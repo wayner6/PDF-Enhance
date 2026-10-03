@@ -33,7 +33,7 @@ from pdf_enhance_core.ocr_engine import set_process_low_priority
 set_process_low_priority()
 
 APP_NAME = "PDF-Enhance"
-APP_NAME_ZH = "PDF 提升"
+APP_NAME_ZH = "PDF 增强"
 APP_VERSION = "0.1.0"
 
 console = Console()

@@ -15,7 +15,7 @@ if errorlevel 1 exit /b 1
 if errorlevel 1 exit /b 1
 
 rem Bundle ONNX Runtime native DLLs and RapidOCR models in BOTH distributions.
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onedir --windowed ^
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onedir --windowed --manifest windows_app.manifest ^
   --name PDF-Enhance ^
   --collect-all rapidocr_onnxruntime ^
   --collect-all onnxruntime ^
@@ -25,7 +25,7 @@ if errorlevel 1 exit /b 1
 powershell -NoProfile -Command "Compress-Archive -Path 'dist\PDF-Enhance' -DestinationPath 'dist\PDF-Enhance-Windows.zip' -Force"
 if errorlevel 1 exit /b 1
 
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed ^
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --manifest windows_app.manifest ^
   --name PDF-Enhance ^
   --collect-all rapidocr_onnxruntime ^
   --collect-all onnxruntime ^

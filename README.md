@@ -1,4 +1,4 @@
-# PDF-Enhance · PDF 提升
+# PDF-Enhance · PDF 增强
 
 PDF-Enhance 是一个可扩展的本地 PDF 处理工具，面向扫描文档、电子书、技术规范和长篇资料。
 
@@ -57,7 +57,13 @@ python pdf_enhance.py "你的文档.pdf"
 
 ## Windows 桌面版
 
-**用户使用：**可以单独运行 `PDF-Enhance.exe`（首次启动可能较慢），也可以解压 `PDF-Enhance-Windows.zip`，双击其中 `PDF-Enhance/PDF-Enhance.exe`；便携压缩包中的 exe 不能脱离旁边的 `_internal` 文件夹运行。不需要安装 Python。选择 PDF，选择处理模式并点击“识别目录”；目录页码可留空自动查找。在窗口内修改目录标题、页码和 Tab 缩进层级，确认页码偏移后点击“生成书签 PDF…”。默认自动模式对扫描件按需 OCR，只制作书签；要生成可搜索 PDF，选择“补全缺少的文字层”或“重做全文 OCR”。覆盖已有目标文件前会弹窗确认。
+**用户使用：**可以单独运行 `PDF-Enhance.exe`（首次启动可能较慢），也可以解压 `PDF-Enhance-Windows.zip`，双击其中 `PDF-Enhance/PDF-Enhance.exe`；便携压缩包中的 exe 不能脱离旁边的 `_internal` 文件夹运行。不需要安装 Python。选择输入 PDF 和输出目录，再选择任务：
+
+- **仅全文 OCR**：点击“开始全文 OCR”，识别全部页面并直接生成 `_ocr.pdf`，不需要目录。
+- **全文 OCR + 制作书签**：点击“开始 OCR 并识别目录”，校对目录和页码偏移后点击“确认目录并生成 PDF”，生成 `_ocr_bookmark.pdf`。中间 OCR 文件保存在临时目录，不写入输出目录。
+- **仅制作书签**：点击“识别目录与书签”，校对后生成 `_bookmark.pdf`；扫描件只按需 OCR，不创建全文文字层。
+
+可设置 OCR 并发进程数（不是线程数），范围为 1 到机器的逻辑核心数，默认读取配置。目录页码留空时自动查找；也可填写 `5-8` 等物理页码。校对框每行填写标题、Tab、逻辑页码，以 Tab 缩进表示下级标题。窗口支持缩放和 Windows 高 DPI 感知。覆盖已有输出前弹窗确认，原始 PDF 不修改。全文 OCR 会重新识别全部页面，并移除全页扫描图上的旧文字层；扫描图里的文字水印不受影响。
 
 **Windows 构建：**在 Windows 机器上安装 Python 3.12（含 `py` 启动器），联网运行 `build_windows.bat`。脚本创建 `.venv`、安装依赖、运行测试，并用 PyInstaller 分别生成独立运行的 `dist/PDF-Enhance.exe` 和便携版 `dist/PDF-Enhance-Windows.zip`。重新运行会覆盖同名构建产物。GitHub Actions 工作流也会构建并上传这两个文件作为构建产物，**不会自动发布 Release**。请在干净的 Windows 机器上实际打开两个版本并测试 OCR、书签及中文 PDF 后再发布；构建脚本本身不能代替发行版验收。未签名的 exe 可能触发 Windows SmartScreen 提示。
 
