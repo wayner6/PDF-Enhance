@@ -1,0 +1,13 @@
+{
+  "general": {
+    "dpi": 200,
+    "max_ocr_workers": 4
+  },
+  "ai_toc": {
+    "enabled": false,
+    "base_url": "https://api.openai.com/v1",
+    "api_key": "",
+    "model": "gpt-4o-mini",
+    "description": "可选配置。若启用且填入 API_KEY，将调用视觉大模型（如通义千问 Qwen-VL、GPT-4o、GLM-4V）进行超高精度目录理解"
+  }
+}

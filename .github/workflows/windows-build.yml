@@ -1,0 +1,27 @@
+name: Windows desktop build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build and test
+        shell: cmd
+        run: build_windows.bat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Enhance-Windows
+          path: |
+            dist/PDF-Enhance.exe
+            dist/PDF-Enhance-Windows.zip
+          if-no-files-found: error

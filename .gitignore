@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# Runtime and test artifacts
+temp/*
+!temp/.gitkeep
+*_searchable.pdf
+*_bookmark.pdf
+sample_book.pdf
+sample_book_output.pdf
+test_toc.txt
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

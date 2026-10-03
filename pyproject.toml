@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-enhance"
+version = "0.1.0"
+description = "Extensible local PDF OCR, searchable text layer, TOC and bookmark toolkit"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "pymupdf>=1.24.0",
+  "rapidocr-onnxruntime>=1.3.0",
+  "opencv-python>=4.8.0",
+  "pillow>=10.0.0",
+  "rich>=13.0.0",
+  "openai>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+pdf-enhance = "pdf_enhance:run_wizard"
+
+[tool.setuptools]
+py-modules = ["pdf_enhance"]
+
+[tool.setuptools.packages.find]
+include = ["pdf_enhance_core*"]
