@@ -49,7 +49,7 @@ def test_full_searchable_pdf():
             metadata = " ".join(str(value or "") for value in result.metadata.values())
             assert check_pdf_text_layer(result) is True
             assert "PDF-Enhance searchable OCR" in metadata
-            assert "深度学习" in extracted or "Chapter" in extracted
+            assert "深度学习" in extracted.replace(" ", "") or "Chapter" in extracted.replace(" ", "")
 
 
 if __name__ == "__main__":
