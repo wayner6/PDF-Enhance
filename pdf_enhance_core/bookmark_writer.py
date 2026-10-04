@@ -4,6 +4,7 @@ import tempfile
 from typing import List, Tuple, Optional
 import pymupdf as fitz
 from .parser import TOCItem
+from .detector import usable_page_text
 
 def find_title_coordinate_on_page(page: fitz.Page, title: str) -> Optional[fitz.Point]:
     """
@@ -86,6 +87,7 @@ def apply_bookmarks(
     use_ocr_coordinates: bool = False,
     ocr_dpi: int = 150,
     ocr_cache: Optional[dict] = None,
+    ocr_fallback: bool = False,
 ) -> Tuple[bool, int, str]:
     """
     将书签写入 PDF 并另存为新文件。
@@ -164,7 +166,13 @@ def apply_bookmarks(
                 for check_p in nearby_pages:
                     if check_p < 1 or check_p > total_pages:
                         continue
-                    page_text = re.sub(r"\s+", "", doc[check_p - 1].get_text())
+                    page_obj = doc[check_p - 1]
+                    text = usable_page_text(page_obj)
+                    if not text and (ocr_fallback or use_ocr_coordinates):
+                        from .ocr_engine import cached_page_ocr
+                        rows, _ = cached_page_ocr(page_obj, ocr_dpi, ocr_cache)
+                        text = "\n".join(str(row.get("text", "")) for row in rows)
+                    page_text = re.sub(r"\s+", "", text)
                     position = page_text.find(compact_title)
                     if position >= 0 and position <= max(100, len(page_text) // 5):
                         target_pno = check_p
@@ -186,8 +194,12 @@ def apply_bookmarks(
                 from .ocr_engine import cached_page_ocr
                 items, _ = cached_page_ocr(page_obj, ocr_dpi, ocr_cache)
                 coord_point = find_title_coordinate_from_ocr_items(items, item.title)
-            if coord_point is None:
+            if coord_point is None and usable_page_text(page_obj):
                 coord_point = find_title_coordinate_on_page(page_obj, item.title)
+            if coord_point is None and ocr_fallback:
+                from .ocr_engine import cached_page_ocr
+                items, _ = cached_page_ocr(page_obj, ocr_dpi, ocr_cache)
+                coord_point = find_title_coordinate_from_ocr_items(items, item.title)
             
             if coord_point is not None:
                 precise_count += 1
@@ -219,6 +231,8 @@ def apply_bookmarks(
         temp_output = None
         
         msg = f"已写入 {len(fitz_toc)} 个书签，其中 {precise_count} 个定位到标题位置。"
+        if precise_count < len(fitz_toc):
+            msg += f" {len(fitz_toc) - precise_count} 个未精确定位的书签跳转到对应页页首。"
         if clipped_count > 0:
             msg += f" {clipped_count} 个页码超出范围，已移到最近的有效页面。"
             

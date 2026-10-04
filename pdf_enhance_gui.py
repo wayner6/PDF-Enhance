@@ -13,11 +13,12 @@ from tkinter import filedialog, font, messagebox, ttk
 import pymupdf as fitz
 from pdf_enhance_core import (
     apply_bookmarks, detect_page_offset, detect_page_offset_with_ocr,
-    detect_toc_pages, detect_toc_pages_with_ocr, generate_searchable_pdf,
+    detect_toc_pages_with_ocr, generate_searchable_pdf,
     import_from_toc_file, load_general_config,
-    parse_toc_from_ocr_pages, parse_toc_from_pages, scan_layer_stats,
-    text_layer_stats, text_quality_stats,
+    parse_toc_from_ocr_pages, parse_toc_from_pages,
 )
+from pdf_enhance_core.detector import usable_page_text
+from pdf_enhance_core.parser import guess_level_by_numbering, toc_items_need_ocr
 
 MODES = ("仅全文 OCR", "全文 OCR + 制作书签", "仅制作书签")
 
@@ -286,7 +287,10 @@ class PDFEnhanceApp:
     def start(self):
         try:
             target = self.validate_target()
-            workers = int(self.workers_var.get())
+            try:
+                workers = int(self.workers_var.get())
+            except ValueError:
+                raise ValueError("OCR 并发进程数必须是整数。") from None
             if not 1 <= workers <= self.cpu_count:
                 raise ValueError(f"OCR 并发进程数必须在 1 到 {self.cpu_count} 之间。")
         except ValueError as exc:
@@ -309,13 +313,8 @@ class PDFEnhanceApp:
         with fitz.open(source) as doc:
             if doc.needs_pass:
                 raise ValueError("请先解密 PDF 后再处理。")
-            scanned = False
-            if mode != MODES[0]:
-                text_pages, total = text_layer_stats(doc)
-                suspicious, evaluated = text_quality_stats(doc)
-                scan_pages, _ = scan_layer_stats(doc)
-                scanned = (text_pages < total or scan_pages >= max(1, total // 2)
-                           or (evaluated > 0 and suspicious >= max(1, round(evaluated * .2))))
+            if not len(doc):
+                raise ValueError("PDF 没有可处理的页面。")
         working = source
         if mode != MODES[2]:
             self.events.put(("status", f"正在对全部页面执行 OCR，使用 {workers} 个并发进程…"))
@@ -332,28 +331,41 @@ class PDFEnhanceApp:
             working = searchable
 
         try:
-            use_ocr = mode == MODES[2] and scanned
             self.events.put(("status", "正在自动寻找目录、解析书签并计算页码偏移…"))
             with fitz.open(working) as doc:
-                pages = (detect_toc_pages_with_ocr(doc, dpi=cfg["dpi"], ocr_cache=ocr_cache)
-                         if scanned else detect_toc_pages(doc))
-                if not pages and not scanned:
+                # 不看扫描底图比例：逐页先用正常文字层；新生成的 OCR 则直接复用。
+                pages = detect_toc_pages_with_ocr(doc, dpi=cfg["dpi"], ocr_cache=ocr_cache, prefer_text=True)
+                if not pages:
+                    # 文字可读不等于排版能被解析，整个目录探测失败后才强制 OCR 重试。
                     pages = detect_toc_pages_with_ocr(doc, dpi=cfg["dpi"], ocr_cache=ocr_cache)
-                    scanned = bool(pages)
-                    use_ocr = mode == MODES[2] and scanned
                 if not pages:
                     raise ValueError("未自动找到目录页")
-                items = (parse_toc_from_ocr_pages(doc, pages, dpi=cfg["dpi"], ocr_cache=ocr_cache)
-                         if scanned else parse_toc_from_pages(doc, pages))
-                if not items and not scanned:
-                    items = parse_toc_from_ocr_pages(doc, pages, dpi=cfg["dpi"], ocr_cache=ocr_cache)
-                if not items:
-                    raise ValueError("目录页没有解析出有效书签条目")
-                if use_ocr:
-                    offset, detail = detect_page_offset_with_ocr(doc, items, pages[-1], dpi=min(cfg["dpi"], 180), ocr_cache=ocr_cache)
-                else:
-                    offset, detail = detect_page_offset(doc, items, pages[-1])
-            return "analysis", working, items, pages, offset, detail, use_ocr, ocr_cache
+                items = []
+                for number in pages:
+                    parsed = []
+                    if number - 1 not in ocr_cache and usable_page_text(doc[number - 1]):
+                        try:
+                            parsed = parse_toc_from_pages(doc, [number])
+                        except (ValueError, RuntimeError):
+                            parsed = []
+                    if toc_items_need_ocr(parsed):
+                        parsed = parse_toc_from_ocr_pages(doc, [number], dpi=cfg["dpi"], ocr_cache=ocr_cache)
+                    if not parsed:
+                        raise ValueError(f"第 {number} 页目录没有解析出有效书签条目")
+                    if items:
+                        parsed[0].level = guess_level_by_numbering(parsed[0].title) or parsed[0].level
+                    items.extend(parsed)
+                items[0].level = 1
+                for index in range(1, len(items)):
+                    items[index].level = max(1, min(items[index].level, items[index - 1].level + 1))
+                try:
+                    offset, detail = detect_page_offset(doc, items, pages[-1], require_match=True)
+                except ValueError:
+                    offset, detail = detect_page_offset_with_ocr(
+                        doc, items, pages[-1], dpi=cfg["dpi"], ocr_cache=ocr_cache, require_match=True,
+                    )
+            # 定位时也先使用可用文字层，缺失或未匹配才局部 OCR，不能整本强制 OCR。
+            return "analysis", working, items, pages, offset, detail, False, ocr_cache
         except Exception as exc:
             if mode == MODES[1]:
                 return "ocr_only", f"错误：目录或书签识别失败（{exc}）。", searchable
@@ -400,7 +412,8 @@ class PDFEnhanceApp:
         self.events.put(("status", "正在定位标题并生成最终 PDF…"))
         ok, _, message = apply_bookmarks(
             str(working), str(output), items, page_offset=offset,
-            use_ocr_coordinates=use_ocr, ocr_dpi=min(load_general_config()["dpi"], 180), ocr_cache=ocr_cache,
+            use_ocr_coordinates=use_ocr, ocr_dpi=load_general_config()["dpi"], ocr_cache=ocr_cache,
+            ocr_fallback=True,
         )
         if not ok:
             raise RuntimeError(message)

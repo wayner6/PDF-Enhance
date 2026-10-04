@@ -189,6 +189,23 @@ def extract_items_from_row_text(row_text: str) -> List[Tuple[str, int]]:
                 
     return results
 
+def toc_items_need_ocr(items: List[TOCItem]) -> bool:
+    """非空结果也可能丢失编号：如主章与后续小节的编号前缀矛盾。"""
+    from .detector import text_is_readable
+    if not items or any(item.logical_page < 1 or not text_is_readable(item.title) for item in items):
+        return True
+    chapter = None
+    for item in items:
+        number = re.match(r"^(\d+)(?:\.(\d+))?", re.sub(r"\s+", "", item.title))
+        if not number:
+            chapter = None
+        elif number.group(2) is None:
+            chapter = int(number.group(1))
+        elif chapter is not None and int(number.group(1)) != chapter:
+            return True
+    return False
+
+
 def parse_toc_from_pages(doc: fitz.Document, toc_pages: List[int]) -> List[TOCItem]:
     """
     从给定的目录物理页列表中高鲁棒性解析书签结构。
@@ -251,6 +268,13 @@ def parse_toc_from_pages(doc: fitz.Document, toc_pages: List[int]) -> List[TOCIt
         for r in rows:
             sorted_spans = sorted(r["spans"], key=lambda s: s["x0"])
             row_text = " ".join([s["text"] for s in sorted_spans]).strip()
+            # 字符级 OCR 文字层会把 2.1 和 (12) 拆成多个 span；仅在
+            # 章节编号、括号页码的边界内合并空格，不改动标题中的数字术语。
+            prefix = re.match(r"^\s*(\d[\d.\s]*)(?=[A-Za-z\u4e00-\u9fa5])", row_text)
+            if prefix:
+                row_text = re.sub(r"\s+", "", prefix.group(1)) + " " + row_text[prefix.end():]
+            row_text = re.sub(r"[（(]\s*([\d\s]+)\s*[）)]\s*$",
+                              lambda match: "(" + re.sub(r"\s+", "", match.group(1)) + ")", row_text)
             
             if not row_text or is_ignorable_header_or_noise(row_text, total_pdf_pages):
                 continue
@@ -302,21 +326,9 @@ def _parse_margin_page_token(text: str) -> Optional[int]:
     return None
 
 
-def _fit_page_number_to_document(value: int, max_page_number: Optional[int]) -> Optional[int]:
-    """修正点引线造成的末位重复；无法落入文档页数范围时返回 None。"""
-    if max_page_number is None or value <= max_page_number:
-        return value
-    digits = str(value)
-    while value > max_page_number and len(digits) >= 2 and digits[-1] == digits[-2]:
-        digits = digits[:-1]
-        value = int(digits)
-    return value if value <= max_page_number else None
-
-
 def _ocr_right_margin_page_numbers(
     page: fitz.Page,
     dpi: int = 250,
-    max_page_number: Optional[int] = None,
 ) -> List[Tuple[float, int]]:
     """单独识别目录右侧页码列，避免点引线令小数字漏检。"""
     from .image_preprocess import preprocess_page_image
@@ -349,11 +361,7 @@ def _ocr_right_margin_page_numbers(
             value = _parse_margin_page_token(raw_token)
             if value is None:
                 continue
-            # 点引线贴近页码时，OCR 偶尔会把末位重复一次，如 16 -> 166。
-            # 仅在结果超过 PDF 总页数时纠正，避免改动合法的三位页码。
-            value = _fit_page_number_to_document(value, max_page_number)
-            if value is None:
-                continue
+            # 节选文档的逻辑页码可能大于文件页数；不据此删位或丢弃。
             box = result[0]
             y_center = sum(point[1] for point in box) / len(box) * scale_y
             candidates.append((y_center, value, float(result[2]), crop_index))
@@ -475,9 +483,7 @@ def parse_toc_from_ocr_pages(
             continue
         page = doc[physical_page - 1]
         ocr_items, _ = cached_page_ocr(page, dpi, ocr_cache)
-        margin_numbers = _ocr_right_margin_page_numbers(
-            page, max_page_number=len(doc)
-        )
+        margin_numbers = _ocr_right_margin_page_numbers(page)
         left_numbers = _ocr_left_numbering_tokens(page)
         unused_numbers = set(range(len(margin_numbers)))
 

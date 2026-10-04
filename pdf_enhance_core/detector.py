@@ -17,6 +17,26 @@ def text_layer_stats(doc: fitz.Document, min_chars_per_page: int = 10) -> Tuple[
     return pages_with_text, len(doc)
 
 
+def text_is_readable(text: str, min_chars: int = 2) -> bool:
+    """逐页判断文字是否可用；不以扫描底图或隐藏文字本身判断质量。"""
+    text = text.strip()
+    if len(text) < min_chars:
+        return False
+    length = len(text)
+    control_count = sum(unicodedata.category(char) == "Cc" and char not in "\n\r\t" for char in text)
+    private_count = sum(unicodedata.category(char) == "Co" for char in text)
+    return (control_count / length < 0.015 and private_count / length < 0.01
+            and text.count("�") / length < 0.005)
+
+
+def usable_page_text(page: fitz.Page) -> str:
+    try:
+        text = page.get_text().strip()
+    except (ValueError, RuntimeError):
+        return ""  # 字体或文字流损坏时仍可尝试渲染后 OCR。
+    return text if text_is_readable(text) and any(char.isalpha() for char in text) else ""
+
+
 def text_quality_stats(doc: fitz.Document, min_chars_per_page: int = 20) -> Tuple[int, int]:
     """统计疑似乱码文字层页数。控制字符、私用区字符和替换字符通常表示字体映射损坏。"""
     suspicious_pages = 0
@@ -26,18 +46,7 @@ def text_quality_stats(doc: fitz.Document, min_chars_per_page: int = 20) -> Tupl
         if len(text) < min_chars_per_page:
             continue
         evaluated_pages += 1
-        length = max(len(text), 1)
-        control_count = sum(
-            unicodedata.category(char) == "Cc" and char not in "\n\r\t"
-            for char in text
-        )
-        private_count = sum(unicodedata.category(char) == "Co" for char in text)
-        replacement_count = text.count("�")
-        if (
-            control_count / length >= 0.015
-            or private_count / length >= 0.01
-            or replacement_count / length >= 0.005
-        ):
+        if not text_is_readable(text, min_chars=min_chars_per_page):
             suspicious_pages += 1
     return suspicious_pages, evaluated_pages
 
@@ -111,6 +120,9 @@ def score_toc_text(text: str) -> Tuple[bool, int]:
     wrapped_page_lines = 0
     
     for line in lines:
+        # 独立的多级条款编号不是目录页码（文字层可能在点后插入空格）。
+        if re.fullmatch(r'\d+(?:\s*\.\s*\d+)+\s*', line):
+            continue
         # 检查是否包含点引线 (如 .......)
         if re.search(r'[.·…\-_﹍]{3,}', line):
             dot_leader_lines += 1
@@ -141,7 +153,7 @@ def score_toc_text(text: str) -> Tuple[bool, int]:
 
 def is_toc_page(page: fitz.Page) -> Tuple[bool, int]:
     """分析带文字层页面的目录特征。"""
-    return score_toc_text(page.get_text())
+    return score_toc_text(usable_page_text(page))
 
 
 def _best_contiguous_group(detected_pages: List[int]) -> List[int]:
@@ -181,6 +193,7 @@ def detect_toc_pages_with_ocr(
     max_search_pages: int = 35,
     dpi: int = 150,
     ocr_cache: Optional[dict] = None,
+    prefer_text: bool = False,
 ) -> List[int]:
     """OCR 探测目录，并把相邻的中文目录和英文目录分成不同组。"""
     from .ocr_engine import cached_page_ocr
@@ -188,11 +201,21 @@ def detect_toc_pages_with_ocr(
     candidates = []
     search_limit = min(max_search_pages, len(doc))
     for page_index in range(search_limit):
-        items, _ = cached_page_ocr(doc[page_index], dpi, ocr_cache)
-        text = "\n".join(str(item.get("text", "")) for item in items)
+        page = doc[page_index]
+        text = usable_page_text(page) if prefer_text and page_index not in (ocr_cache or {}) else ""
+        used_text = bool(text)
+        if not text:
+            items, _ = cached_page_ocr(page, dpi, ocr_cache)
+            text = "\n".join(str(item.get("text", "")) for item in items)
         is_toc, score = score_toc_text(text)
         if score < 40:
             continue
+        if used_text and not is_toc:
+            # 正文中的孤立列表数字也会获得弱分；可读文字层的续目录
+            # 还应至少能解析出两条标题/页码，而非仅凭数字把正文接入目录。
+            from .parser import parse_toc_from_pages
+            if len(parse_toc_from_pages(doc, [page_index + 1])) < 2:
+                continue
         cjk_count = sum("\u4e00" <= char <= "\u9fff" for char in text)
         latin_count = sum(char.isascii() and char.isalpha() for char in text)
         language = "zh" if cjk_count >= max(5, latin_count // 5) else "en"

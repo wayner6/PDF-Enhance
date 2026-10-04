@@ -57,15 +57,15 @@ def test_combined_failure_preserves_ocr(tmp_path, monkeypatch, stage):
         Path(output).write_bytes(Path(source).read_bytes())
         return True, "OCR done"
 
-    def fail_offset(*args):
+    def fail_offset(*args, **kwargs):
         raise ValueError("无法计算偏移")
 
     monkeypatch.setattr(gui, "generate_searchable_pdf", fake_ocr)
-    monkeypatch.setattr(gui, "detect_toc_pages", lambda doc: [] if stage == "detection" else [1])
-    monkeypatch.setattr(gui, "detect_toc_pages_with_ocr", lambda *args, **kwargs: [])
+    monkeypatch.setattr(gui, "detect_toc_pages_with_ocr", lambda *args, **kwargs: [] if stage == "detection" else [1])
     monkeypatch.setattr(gui, "parse_toc_from_pages", lambda *args: [] if stage == "parsing" else [TOCItem("1 总则", 1)])
     monkeypatch.setattr(gui, "parse_toc_from_ocr_pages", lambda *args, **kwargs: [])
     monkeypatch.setattr(gui, "detect_page_offset", fail_offset)
+    monkeypatch.setattr(gui, "detect_page_offset_with_ocr", fail_offset)
     app = gui.PDFEnhanceApp.__new__(gui.PDFEnhanceApp)
     app.events = queue.Queue()
     result = app.process_worker(source, gui.MODES[1], working, 1)

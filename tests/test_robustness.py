@@ -8,7 +8,7 @@ import pytest
 from pdf_enhance_core.config import load_config
 from pdf_enhance_core.parser import (
     TOCItem,
-    _fit_page_number_to_document,
+    _parse_margin_page_token,
     clean_toc_title,
     extract_items_from_row_text,
 )
@@ -78,11 +78,11 @@ def test_broken_unicode_mapping_is_detected():
     assert text_quality_stats(valid) == (0, 4)
 
 
-def test_repeated_last_digit_page_number_is_fixed_only_when_out_of_range():
-    assert _fit_page_number_to_document(166, 82) == 16
-    assert _fit_page_number_to_document(144, 82) == 14
-    assert _fit_page_number_to_document(177, 200) == 177
-    assert _fit_page_number_to_document(95, 82) is None
+def test_logical_page_digits_are_preserved_for_excerpt_documents():
+    assert _parse_margin_page_token("(166)") == 166
+    assert _parse_margin_page_token("(144)") == 144
+    assert _parse_margin_page_token("177") == 177
+    assert _parse_margin_page_token("95") == 95
 
 
 def test_preface_split_into_two_text_lines_is_found_after_toc_page():

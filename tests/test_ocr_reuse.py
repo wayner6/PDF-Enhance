@@ -98,9 +98,9 @@ def test_combined_success_only_exports_final_pdf(tmp_path, monkeypatch):
         kwargs["ocr_page_callback"](0, [item("1 Sample", 50, 50)])
         return True, "OCR complete"
     monkeypatch.setattr(gui, "generate_searchable_pdf", fake_ocr)
-    monkeypatch.setattr(gui, "detect_toc_pages", lambda doc: [1])
-    monkeypatch.setattr(gui, "parse_toc_from_pages", lambda *args: [TOCItem("1 Sample", 1)])
-    monkeypatch.setattr(gui, "detect_page_offset", lambda *args: (0, ""))
+    monkeypatch.setattr(gui, "detect_toc_pages_with_ocr", lambda *args, **kwargs: [1])
+    monkeypatch.setattr(gui, "parse_toc_from_ocr_pages", lambda *args, **kwargs: [TOCItem("1 Sample", 1)])
+    monkeypatch.setattr(gui, "detect_page_offset", lambda *args, **kwargs: (0, ""))
     app = gui.PDFEnhanceApp.__new__(gui.PDFEnhanceApp)
     app.events = queue.Queue()
     result = app.process_worker(source, gui.MODES[1], working, 1)

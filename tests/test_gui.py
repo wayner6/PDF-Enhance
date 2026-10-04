@@ -26,9 +26,9 @@ def test_three_task_routes(tmp_path, monkeypatch, mode):
         return True, "OCR complete"
 
     monkeypatch.setattr(gui, "generate_searchable_pdf", fake_ocr)
-    monkeypatch.setattr(gui, "detect_toc_pages", lambda doc: [1])
+    monkeypatch.setattr(gui, "detect_toc_pages_with_ocr", lambda *args, **kwargs: [1])
     monkeypatch.setattr(gui, "parse_toc_from_pages", lambda doc, pages: [TOCItem("1 Test", 1)])
-    monkeypatch.setattr(gui, "detect_page_offset", lambda *args: (0, "offset found"))
+    monkeypatch.setattr(gui, "detect_page_offset", lambda *args, **kwargs: (0, "offset found"))
     app = gui.PDFEnhanceApp.__new__(gui.PDFEnhanceApp)
     app.events = queue.Queue()
     target = gui.output_path(source, tmp_path, mode)
