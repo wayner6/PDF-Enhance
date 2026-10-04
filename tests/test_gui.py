@@ -55,7 +55,7 @@ def test_output_names(tmp_path):
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows desktop layout smoke check")
-def test_window_modes_and_busy_controls():
+def test_window_modes_and_busy_controls(tmp_path, monkeypatch):
     gui.enable_high_dpi()
     root = tk.Tk()
     root.withdraw()
@@ -67,19 +67,34 @@ def test_window_modes_and_busy_controls():
         assert not hasattr(app, "offset_var")
         assert not hasattr(app, "target_label")
         assert not hasattr(app, "description_label")
-        app.mode_var.set(gui.MODES[0])
-        app.mode_changed()
-        assert not app.bookmarks.winfo_manager()
-        assert app.start_btn.cget("text") == "开始全文 OCR"
-        app.mode_var.set(gui.MODES[2])
-        app.mode_changed()
-        assert app.bookmarks.winfo_manager() == "grid"
+        assert not hasattr(app, "bookmarks")
+        assert not hasattr(app, "toc_text")
+        assert not hasattr(app, "save_btn")
+        for mode in gui.MODES:
+            app.mode_var.set(mode)
+            app.mode_changed()
+            assert app.start_btn.cget("text") == "开始处理"
         app.set_busy(True)
         assert str(app.start_btn.cget("state")) == "disabled"
         app.set_busy(False)
         assert str(app.start_btn.cget("state")) == "normal"
-        assert str(app.save_btn.cget("state")) == "disabled"
-        root.update_idletasks()
+        root.deiconify()
+        root.update()
+        assert (root.winfo_width(), root.winfo_height()) == root.minsize()
+        source = tmp_path / "source.pdf"
+        source.write_bytes(b"test input")
+        app.source = source
+        app.directory_var.set(str(tmp_path))
+        jobs = []
+        monkeypatch.setattr(app, "start_job", lambda target, *args: jobs.append((target, args)))
+        app.start()
+        assert jobs[0][0] == app.complete_worker
+        output = tmp_path / "source_bookmark.pdf"
+        output.write_bytes(b"existing")
+        monkeypatch.setattr(gui.messagebox, "askyesno", lambda *args: False)
+        app.start()
+        assert len(jobs) == 1
+        assert output.read_bytes() == b"existing"
     finally:
         app.workspace.cleanup()
         root.destroy()
