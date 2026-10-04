@@ -89,9 +89,13 @@ def score_toc_text(text: str) -> Tuple[bool, int]:
     if len(lines) < 2:
         return False, 0
         
-    has_keyword = False
+    # OCR 常将横排的“目 次”拆成两个框，甚至两行。
+    heading = re.sub(r'\s+', '', ''.join(lines[:5]).lower())
+    has_keyword = any(heading.startswith(kw) for kw in ("目录", "目次", "contents", "tableofcontents", "总目"))
+    if has_keyword:
+        score += 50
     # 1. 关键词命中（整行包含或前缀包含"目录"/"contents"）
-    for line in lines[:5]:  # 关键词一般在页首前几行
+    for line in ([] if has_keyword else lines[:5]):  # 关键词一般在页首前几行
         line_clean = re.sub(r'\s+', '', line.lower())
         for kw in ["目录", "目次", "contents", "tableofcontents", "总目"]:
             if kw == line_clean or line_clean.startswith(kw):
@@ -104,15 +108,18 @@ def score_toc_text(text: str) -> Tuple[bool, int]:
     # 2. 结构特征：检查带有点引线或多行带页码的条目
     numbered_lines = 0
     dot_leader_lines = 0
+    wrapped_page_lines = 0
     
     for line in lines:
         # 检查是否包含点引线 (如 .......)
         if re.search(r'[.·…\-_﹍]{3,}', line):
             dot_leader_lines += 1
         # 检查行尾是否有合理页码数字 (通常 1~4 位数字，避免误把年份如 2025 当页码)
-        m = re.search(r'(?:[.·…\-_﹍\s]|^)(\d{1,4})\s*$', line)
+        m = re.search(r'(?:[.·…\-_﹍\s]|^)[（(]?(\d{1,4})[）)]?\s*$', line)
         if m:
             numbered_lines += 1
+        if re.search(r'(?:^|\s)[（(]\s*\d{1,4}\s*[）)]\s*$', line):
+            wrapped_page_lines += 1
             
     # 目录页必须有足够的条目数（至少 3 行以上带有页码，或者有关键词且至少 2 行带页码）
     if numbered_lines >= 3:
@@ -125,6 +132,9 @@ def score_toc_text(text: str) -> Tuple[bool, int]:
 
     if dot_leader_lines >= 2:
         score += 30
+    # 多个括号页码是目录续页的特征，不把正文的孤立条款编号当成目录。
+    if wrapped_page_lines >= 3:
+        score += 20
         
     return score >= 60, score
 

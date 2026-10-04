@@ -32,8 +32,7 @@ def test_three_task_routes(tmp_path, monkeypatch, mode):
     app = gui.PDFEnhanceApp.__new__(gui.PDFEnhanceApp)
     app.events = queue.Queue()
     target = gui.output_path(source, tmp_path, mode)
-    # OCR-only must ignore a directory range, even if it's invalid.
-    result = app.process_worker(source, mode, "bad" if mode == gui.MODES[0] else "", target, 2)
+    result = app.process_worker(source, mode, target, 2)
     if mode == gui.MODES[0]:
         assert result[0] == "saved"
     else:
@@ -64,6 +63,10 @@ def test_window_modes_and_busy_controls():
     try:
         assert "PDF 增强" in root.title()
         assert len(gui.MODES) == 3
+        assert app.pages_var.get() == "自动识别"
+        assert app.offset_var.get() == "自动识别"
+        # 页码区域只有结果标签，不能编辑；仅输出目录/任务等设置可操作。
+        assert not any(isinstance(widget, gui.ttk.Entry) for widget in app.bookmarks.winfo_children()[0].winfo_children())
         app.mode_var.set(gui.MODES[0])
         app.mode_changed()
         assert not app.bookmarks.winfo_manager()

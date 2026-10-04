@@ -34,7 +34,9 @@ def generate_sample_pdf(output_path: str = "sample_book.pdf"):
             page.insert_font(fontname="f0", fontfile=chinese_font, set_simple=False)
             page.insert_text((x, y), text, fontname="f0", fontsize=size)
         else:
-            page.insert_text((x, y), text, fontsize=size)
+            # 内置 CJK 字体的西文标点较宽，确保行尾页码不会被裁出页面。
+            fitted_size = min(size, (page.rect.width - x - 30) / max(len(text), 1))
+            page.insert_text((x, y), text, fontname="china-s", fontsize=fitted_size)
 
     # 1. 封面
     p1 = doc.new_page()

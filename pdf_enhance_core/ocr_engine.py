@@ -37,7 +37,10 @@ def get_ocr_engine() -> RapidOCR:
         _OCR_INSTANCE = RapidOCR(
             det_limit_side_len=1200,
             det_box_thresh=0.3,
-            det_unclip_ratio=1.8
+            det_unclip_ratio=1.8,
+            # 并发由外层进程池控制，避免每个 ONNX 会话再启动多线程争抢 CPU。
+            intra_op_num_threads=1,
+            inter_op_num_threads=1,
         )
     return _OCR_INSTANCE
 

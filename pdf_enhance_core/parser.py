@@ -124,6 +124,8 @@ def extract_items_from_row_text(row_text: str) -> List[Tuple[str, int]]:
     """
     if is_ignorable_header_or_noise(row_text):
         return []
+    # 标准、规范常用带括号的目录页码，如“总则 …… (1)”。
+    row_text = re.sub(r'[（(]\s*(\d{1,4}|[IVXLCDMivxlcdm]+)\s*[）)]\s*$', r' \1', row_text)
 
     # 以章节号开头且带点引线的目录行按整行解析，避免把 SF6 中的“6”
     # 误当成第二个章节号。
@@ -293,6 +295,7 @@ def parse_toc_from_pages(doc: fitz.Document, toc_pages: List[int]) -> List[TOCIt
 def _parse_margin_page_token(text: str) -> Optional[int]:
     """解析目录右侧独立页码，容忍点引线残留。"""
     token = re.sub(r"^[.·…_\-\s]+|[.·…_\-\s]+$", "", text)
+    token = re.sub(r"^[（(]\s*|\s*[）)]$", "", token)
     if re.fullmatch(r"\d{1,4}", token):
         return int(token)
     if re.fullmatch(r"[IVXLCDMivxlcdm]{1,8}", token):
@@ -403,8 +406,18 @@ def _ocr_left_numbering_tokens(page: fitz.Page, dpi: int = 250) -> List[Tuple[fl
         if not re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){0,3}", token):
             continue
         y_center = sum(point[1] for point in result[0]) / len(result[0]) * scale_y
-        tokens.append((y_center, token))
-    return tokens
+        x0 = min(point[0] for point in result[0])
+        tokens.append((y_center, x0, token))
+    # 裁剪 OCR 也可能把两位章节号拆成“1”和“0”，按同一行重建。
+    rows = []
+    for y_center, x0, token in sorted(tokens):
+        for row in rows:
+            if abs(row[0] - y_center) <= 3.0:
+                row[1].append((x0, token))
+                break
+        else:
+            rows.append((y_center, [(x0, token)]))
+    return [(y, ''.join(token for _, token in sorted(parts))) for y, parts in rows]
 
 
 def _rebuild_ocr_title_rows(
@@ -481,7 +494,12 @@ def parse_toc_from_ocr_pages(
             ]
             if nearby_left:
                 left_token = min(nearby_left)[1]
-                if not re.match(r"^\d{1,3}(?:\s*\.\s*\d{1,3})*", raw_text):
+                numbering = re.match(r"^\d{1,3}(?:\s*\.\s*\d{1,3})*", raw_text)
+                # 整页识别漏掉多位编号首位时，窄列完整编号可用于补回。
+                missing_prefix = (numbering and left_token != numbering.group()
+                                  and left_token.endswith(numbering.group())
+                                  and len(left_token) > len(numbering.group()))
+                if not numbering or missing_prefix:
                     chinese = re.search(r"[\u4e00-\u9fa5]", raw_text)
                     if chinese:
                         raw_text = f"{left_token} {raw_text[chinese.start():]}"

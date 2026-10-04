@@ -13,7 +13,7 @@ import pymupdf as fitz
 from pdf_enhance_core import (
     apply_bookmarks, detect_page_offset, detect_page_offset_with_ocr,
     detect_toc_pages, detect_toc_pages_with_ocr, generate_searchable_pdf,
-    import_from_toc_file, load_general_config, parse_page_range,
+    import_from_toc_file, load_general_config,
     parse_toc_from_ocr_pages, parse_toc_from_pages, scan_layer_stats,
     text_layer_stats, text_quality_stats,
 )
@@ -29,6 +29,11 @@ DESCRIPTIONS = (
 def output_path(source, directory, mode):
     suffix = ("_ocr", "_ocr_bookmark", "_bookmark")[MODES.index(mode)]
     return Path(directory) / (Path(source).stem + suffix + ".pdf")
+
+
+def display_path(path):
+    """Tk 的文件对话框使用正斜杠；统一为当前系统原生路径。"""
+    return os.path.normpath(str(path))
 
 
 def enable_high_dpi():
@@ -76,8 +81,9 @@ class PDFEnhanceApp:
         self.directory_var = tk.StringVar()
         self.mode_var = tk.StringVar(value=MODES[1])
         self.description_var = tk.StringVar()
-        self.pages_var = tk.StringVar()
-        self.offset_var = tk.StringVar(value="0")
+        self.pages_var = tk.StringVar(value="自动识别")
+        self.offset_var = tk.StringVar(value="自动识别")
+        self.page_offset = None
         self.workers_var = tk.StringVar(value=str(min(cfg["max_ocr_workers"], self.cpu_count)))
         self.status_var = tk.StringVar(value="请选择 PDF 文件和输出目录。")
         self.target_var = tk.StringVar()
@@ -128,14 +134,10 @@ class PDFEnhanceApp:
         fields.grid(row=0, sticky="ew")
         fields.columnconfigure(1, weight=1)
         ttk.Label(fields, text="目录物理页码").grid(row=0, column=0, sticky="w")
-        pages = ttk.Entry(fields, textvariable=self.pages_var, width=15)
-        pages.grid(row=0, column=1, sticky="ew", padx=8)
-        self.controls.append((pages, "normal"))
-        ttk.Label(fields, text="留空自动查找，如 5-8").grid(row=0, column=2, sticky="w")
+        ttk.Label(fields, textvariable=self.pages_var).grid(row=0, column=1, sticky="w", padx=8)
+        ttk.Label(fields, text="由软件自动查找").grid(row=0, column=2, sticky="w")
         ttk.Label(fields, text="页码偏移").grid(row=1, column=0, sticky="w", pady=6)
-        offset = ttk.Entry(fields, textvariable=self.offset_var, width=8)
-        offset.grid(row=1, column=1, sticky="w", padx=8)
-        self.controls.append((offset, "normal"))
+        ttk.Label(fields, textvariable=self.offset_var).grid(row=1, column=1, sticky="w", padx=8)
         ttk.Label(fields, text="物理页码 = 目录页码 + 偏移").grid(row=1, column=2, sticky="w")
         ttk.Label(self.bookmarks, text="每行：标题 + Tab + 页码；Tab 缩进表示下级标题。识别后可直接修改。",
                   wraplength=600).grid(row=1, sticky="w", pady=5)
@@ -176,7 +178,11 @@ class PDFEnhanceApp:
 
     def update_target(self):
         if self.source and self.directory_var.get():
-            self.target_var.set(f"输出文件：{output_path(self.source, self.directory_var.get(), self.mode_var.get())}")
+            target = output_path(self.source, self.directory_var.get(), self.mode_var.get())
+            text = f"输出文件：{display_path(target)}"
+            if self.mode_var.get() == MODES[1]:
+                text += f"\n另保留 OCR 文件：{display_path(output_path(self.source, self.directory_var.get(), MODES[0]))}"
+            self.target_var.set(text)
         else:
             self.target_var.set("")
 
@@ -184,7 +190,9 @@ class PDFEnhanceApp:
         self.working = None
         self.items = []
         self.toc_pages = []
-        self.offset_var.set("0")
+        self.page_offset = None
+        self.pages_var.set("自动识别")
+        self.offset_var.set("自动识别")
         self.toc_text.configure(state="normal")
         self.toc_text.delete("1.0", "end")
         self.save_btn.configure(state="disabled")
@@ -207,10 +215,9 @@ class PDFEnhanceApp:
         path = filedialog.askopenfilename(filetypes=[("PDF 文件", "*.pdf")])
         if path:
             self.source = Path(path)
-            self.path_var.set(path)
+            self.path_var.set(display_path(path))
             if not self.directory_var.get():
-                self.directory_var.set(str(self.source.parent))
-            self.pages_var.set("")
+                self.directory_var.set(display_path(self.source.parent))
             self.clear_result()
             self.update_target()
             self.status_var.set("已选择文件；设置任务后点击开始。")
@@ -218,7 +225,7 @@ class PDFEnhanceApp:
     def choose_directory(self):
         path = filedialog.askdirectory(title="选择输出目录", initialdir=self.directory_var.get() or None)
         if path:
-            self.directory_var.set(path)
+            self.directory_var.set(display_path(path))
 
     def set_busy(self, busy):
         self.busy = busy
@@ -240,7 +247,7 @@ class PDFEnhanceApp:
         try:
             self.events.put(("done", target(*args)))
         except Exception as exc:
-            self.events.put(("error", f"{type(exc).__name__}: {exc}"))
+            self.events.put(("error", f"错误：{exc}"))
 
     def poll_events(self):
         try:
@@ -264,7 +271,9 @@ class PDFEnhanceApp:
                     self.set_busy(False)
                     if value[0] == "analysis":
                         _, self.working, self.items, self.toc_pages, offset, detail, self.use_ocr_coordinates = value
-                        self.offset_var.set(str(offset))
+                        self.page_offset = offset
+                        self.pages_var.set("、".join(str(page) for page in self.toc_pages))
+                        self.offset_var.set(f"{offset:+}")
                         self.toc_text.delete("1.0", "end")
                         for item in self.items:
                             indent = "\t" * (item.level - 1)
@@ -273,28 +282,32 @@ class PDFEnhanceApp:
                         self.status_var.set(f"找到 {len(self.items)} 条目录（第 {self.toc_pages} 页）。{detail} 请校对后生成。")
                     else:
                         self.status_var.set(value[1])
-                        messagebox.showinfo("完成", value[1])
+                        if value[0] == "ocr_only":
+                            messagebox.showwarning("OCR 已完成，书签未生成", value[1])
+                        else:
+                            messagebox.showinfo("完成", value[1])
         except queue.Empty:
             pass
         self.root.after(100, self.poll_events)
 
-    def validate_target(self):
+    def validate_target(self, mode=None):
         if not self.source or not self.source.is_file():
             raise ValueError("请先选择存在的 PDF 文件。")
         directory = Path(self.directory_var.get()) if self.directory_var.get() else None
         if directory is None or not directory.is_dir():
             raise ValueError("请选择有效的输出目录。")
-        target = output_path(self.source, directory, self.mode_var.get())
+        target = output_path(self.source, directory, mode or self.mode_var.get())
         if target.resolve() == self.source.resolve() or (target.exists() and os.path.samefile(target, self.source)):
             raise ValueError("不能覆盖输入文件，请更换输出目录。")
         return target
 
     def confirm_target(self, target):
-        return not target.exists() or messagebox.askyesno("确认覆盖", f"生成成功后将替换：\n{target}\n\n继续？")
+        return not target.exists() or messagebox.askyesno("确认覆盖", f"生成成功后将替换：\n{display_path(target)}\n\n继续？")
 
     def start(self):
         try:
-            target = self.validate_target()
+            self.validate_target()
+            ocr_output = self.validate_target(MODES[0])
             workers = int(self.workers_var.get())
             if not 1 <= workers <= self.cpu_count:
                 raise ValueError(f"OCR 并发进程数必须在 1 到 {self.cpu_count} 之间。")
@@ -302,23 +315,20 @@ class PDFEnhanceApp:
             messagebox.showerror("设置错误", str(exc))
             return
         mode = self.mode_var.get()
-        if mode == MODES[0] and not self.confirm_target(target):
+        if mode != MODES[2] and not self.confirm_target(ocr_output):
             return
         if mode != MODES[2] and not messagebox.askyesno(
             "全文 OCR", "将重新识别全部页面。全页扫描图上的旧文字层会被移除，包括文字水印；原始 PDF 不会修改。\n\n继续？"
         ):
             return
         self.clear_result()
-        working = Path(self.workspace.name) / "searchable.pdf" if mode == MODES[1] else target
-        self.start_job(self.process_worker, self.source, mode, self.pages_var.get(), working, workers)
+        self.start_job(self.process_worker, self.source, mode, ocr_output, workers)
 
-    def process_worker(self, source, mode, page_range, searchable, workers):
+    def process_worker(self, source, mode, searchable, workers):
         cfg = load_general_config()
         with fitz.open(source) as doc:
             if doc.needs_pass:
                 raise ValueError("请先解密 PDF 后再处理。")
-            if mode != MODES[0] and page_range.strip() and not parse_page_range(page_range, len(doc)):
-                raise ValueError("目录页码无效或超出 PDF 范围。")
             scanned = False
             if mode != MODES[0]:
                 text_pages, total = text_layer_stats(doc)
@@ -337,35 +347,45 @@ class PDFEnhanceApp:
             if not ok:
                 raise RuntimeError(message)
             if mode == MODES[0]:
-                return "saved", f"{message}\n输出：{searchable}"
+                return "saved", f"{message}\n输出：{display_path(searchable)}"
             working = searchable
 
-        use_ocr = mode == MODES[2] and scanned
-        self.events.put(("status", "正在寻找目录、解析书签并计算页码偏移…"))
-        with fitz.open(working) as doc:
-            if page_range.strip():
-                pages = parse_page_range(page_range, len(doc))
-            else:
+        try:
+            use_ocr = mode == MODES[2] and scanned
+            self.events.put(("status", "正在自动寻找目录、解析书签并计算页码偏移…"))
+            with fitz.open(working) as doc:
                 pages = (detect_toc_pages_with_ocr(doc, dpi=min(cfg["dpi"], 180))
                          if scanned else detect_toc_pages(doc))
-            if not pages:
-                raise ValueError("未找到目录页；请填写目录的物理页码后重试。")
-            items = (parse_toc_from_ocr_pages(doc, pages, dpi=cfg["dpi"])
-                     if scanned else parse_toc_from_pages(doc, pages))
-            if not items:
-                raise ValueError("没有解析出目录条目，请检查目录页码。")
-            if use_ocr:
-                offset, detail = detect_page_offset_with_ocr(doc, items, pages[-1], dpi=min(cfg["dpi"], 180))
-            else:
-                offset, detail = detect_page_offset(doc, items, pages[-1])
-        return "analysis", working, items, pages, offset, detail, use_ocr
+                if not pages and not scanned:
+                    pages = detect_toc_pages_with_ocr(doc, dpi=min(cfg["dpi"], 180))
+                    scanned = bool(pages)
+                    use_ocr = mode == MODES[2] and scanned
+                if not pages:
+                    raise ValueError("未自动找到目录页")
+                items = (parse_toc_from_ocr_pages(doc, pages, dpi=cfg["dpi"])
+                         if scanned else parse_toc_from_pages(doc, pages))
+                if not items and not scanned:
+                    items = parse_toc_from_ocr_pages(doc, pages, dpi=cfg["dpi"])
+                if not items:
+                    raise ValueError("目录页没有解析出有效书签条目")
+                if use_ocr:
+                    offset, detail = detect_page_offset_with_ocr(doc, items, pages[-1], dpi=min(cfg["dpi"], 180))
+                else:
+                    offset, detail = detect_page_offset(doc, items, pages[-1])
+            return "analysis", working, items, pages, offset, detail, use_ocr
+        except Exception as exc:
+            if mode == MODES[1]:
+                return "ocr_only", f"错误：目录或书签识别失败（{exc}）。\n全文 OCR 已完成并保存：{display_path(searchable)}"
+            raise
 
     def save(self):
         if not self.working:
             return
         try:
             target = self.validate_target()
-            offset = int(self.offset_var.get().strip())
+            offset = self.page_offset
+            if offset is None:
+                raise ValueError("尚未完成自动页码偏移识别。")
             path = Path(self.workspace.name) / "toc.txt"
             path.write_text(self.toc_text.get("1.0", "end"), encoding="utf-8")
             items = import_from_toc_file(str(path))
@@ -388,7 +408,7 @@ class PDFEnhanceApp:
         )
         if not ok:
             raise RuntimeError(message)
-        return "saved", f"{message}\n输出：{output}"
+        return "saved", f"{message}\n输出：{display_path(output)}"
 
     def close(self):
         if self.busy:
