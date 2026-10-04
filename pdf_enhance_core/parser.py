@@ -1,4 +1,3 @@
-import io
 import re
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
@@ -127,8 +126,8 @@ def extract_items_from_row_text(row_text: str) -> List[Tuple[str, int]]:
     # 标准、规范常用带括号的目录页码，如“总则 …… (1)”。
     row_text = re.sub(r'[（(]\s*(\d{1,4}|[IVXLCDMivxlcdm]+)\s*[）)]\s*$', r' \1', row_text)
 
-    # 以章节号开头且带点引线的目录行按整行解析，避免把 SF6 中的“6”
-    # 误当成第二个章节号。
+    # 以章节号开头且带点引线的目录行按整行解析，避免把标题术语中的
+    # 数字误当成第二个章节号。
     if re.match(r"^\s*\d{1,3}(?:\.\d+)*\s+", row_text) and re.search(
         r"[.·…_﹍]{3,}", row_text
     ):
@@ -323,8 +322,8 @@ def _ocr_right_margin_page_numbers(
     from .image_preprocess import preprocess_page_image
     from .ocr_engine import get_ocr_engine
 
-    pix = page.get_pixmap(dpi=dpi)
-    image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+    pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csRGB, alpha=False)
+    image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
     array = np.asarray(image)
     height, width = array.shape[:2]
 
@@ -393,8 +392,8 @@ def _ocr_left_numbering_tokens(page: fitz.Page, dpi: int = 250) -> List[Tuple[fl
     from .image_preprocess import preprocess_page_image
     from .ocr_engine import get_ocr_engine
 
-    pix = page.get_pixmap(dpi=dpi)
-    image = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+    pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csRGB, alpha=False)
+    image = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
     array = np.asarray(image)
     height, width = array.shape[:2]
     crop = Image.fromarray(array[:, int(width * 0.05):int(width * 0.18)])
@@ -460,6 +459,7 @@ def parse_toc_from_ocr_pages(
     doc: fitz.Document,
     toc_pages: List[int],
     dpi: int = 200,
+    ocr_cache: Optional[dict] = None,
 ) -> List[TOCItem]:
     """
     直接从目录图片的 OCR 几何结果解析目录。
@@ -467,14 +467,14 @@ def parse_toc_from_ocr_pages(
     标题区和右侧页码列分别识别，再按 Y 坐标配对。这样不会依赖生成后的
     PDF 文本流，也不会因字符级隐藏文字层将 10 / 11 拆开而丢失首位数字。
     """
-    from .ocr_engine import ocr_pdf_page
+    from .ocr_engine import cached_page_ocr
 
     output: List[TOCItem] = []
     for physical_page in toc_pages:
         if physical_page < 1 or physical_page > len(doc):
             continue
         page = doc[physical_page - 1]
-        ocr_items, _ = ocr_pdf_page(page, dpi=dpi)
+        ocr_items, _ = cached_page_ocr(page, dpi, ocr_cache)
         margin_numbers = _ocr_right_margin_page_numbers(
             page, max_page_number=len(doc)
         )
@@ -505,14 +505,8 @@ def parse_toc_from_ocr_pages(
                         raw_text = f"{left_token} {raw_text[chinese.start():]}"
 
             title = clean_toc_title(raw_text)
-            compact = re.sub(r"\s+", "", title)
-            if compact in {"目录", "目次"}:
-                pass
-            elif not re.match(
-                r"^(?:前言|序言|引言|附录|参考文献|本规范用词说明|引用标准名录|附[：:]?条文说明|"
-                r"\d{1,3}(?:\.\d{1,3}){0,3}\s*[A-Za-z\u4e00-\u9fa5])",
-                title,
-            ):
+            # 使用通用标题有效性和右列页码配对，不按领域词语白名单筛选。
+            if not is_meaningful_title(title):
                 continue
 
             title_rows.append((y_center, title))

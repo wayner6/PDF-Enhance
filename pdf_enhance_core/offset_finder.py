@@ -82,6 +82,7 @@ def detect_page_offset_with_ocr(
     last_toc_page: int,
     dpi: int = 150,
     radius: int = 4,
+    ocr_cache: dict | None = None,
 ) -> Tuple[int, str]:
     """
     为没有全文文字层的扫描 PDF 推算偏移量。
@@ -89,7 +90,7 @@ def detect_page_offset_with_ocr(
     先根据目录结束位置得到粗略偏移，再只 OCR 各候选章节预期页附近的小范围页面，
     避免为了制作书签而识别整本书。
     """
-    from .ocr_engine import ocr_pdf_page
+    from .ocr_engine import cached_page_ocr
 
     candidates = [
         item for item in toc_items
@@ -114,7 +115,7 @@ def detect_page_offset_with_ocr(
 
         for physical_page in range(start, end + 1):
             if physical_page not in page_cache:
-                items, _ = ocr_pdf_page(doc[physical_page - 1], dpi=dpi)
+                items, _ = cached_page_ocr(doc[physical_page - 1], dpi, ocr_cache)
                 page_cache[physical_page] = normalize_text_for_search(
                     "\n".join(str(row.get("text", "")) for row in items)
                 )

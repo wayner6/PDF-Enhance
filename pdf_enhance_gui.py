@@ -3,6 +3,7 @@
 import ctypes
 import os
 import queue
+import shutil
 import tempfile
 import threading
 from pathlib import Path
@@ -19,16 +20,22 @@ from pdf_enhance_core import (
 )
 
 MODES = ("仅全文 OCR", "全文 OCR + 制作书签", "仅制作书签")
-DESCRIPTIONS = (
-    "识别全部页面，生成可搜索、可复制文字的 PDF；不制作书签。",
-    "先识别全部页面，再从目录制作书签；校对目录后生成最终 PDF。",
-    "保留原 PDF 内容，从目录制作书签；扫描件只按需识别，不生成全文文字层。",
-)
-
 
 def output_path(source, directory, mode):
     suffix = ("_ocr", "_ocr_bookmark", "_bookmark")[MODES.index(mode)]
     return Path(directory) / (Path(source).stem + suffix + ".pdf")
+
+
+def export_ocr_fallback(working, output):
+    """目录失败后才导出临时 OCR，原子保存以保护已有文件。"""
+    fd, temporary = tempfile.mkstemp(prefix=".pdf-enhance-ocr-", suffix=".pdf", dir=Path(output).parent)
+    os.close(fd)
+    try:
+        shutil.copyfile(working, temporary)
+        os.replace(temporary, output)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
 
 
 def display_path(path):
@@ -71,6 +78,7 @@ class PDFEnhanceApp:
         self.items = []
         self.toc_pages = []
         self.use_ocr_coordinates = False
+        self.ocr_cache = {}
         self.busy = False
         self.workspace = tempfile.TemporaryDirectory(prefix="pdf-enhance-gui-")
         self.controls = []
@@ -80,13 +88,9 @@ class PDFEnhanceApp:
         self.path_var = tk.StringVar()
         self.directory_var = tk.StringVar()
         self.mode_var = tk.StringVar(value=MODES[1])
-        self.description_var = tk.StringVar()
-        self.pages_var = tk.StringVar(value="自动识别")
-        self.offset_var = tk.StringVar(value="自动识别")
         self.page_offset = None
         self.workers_var = tk.StringVar(value=str(min(cfg["max_ocr_workers"], self.cpu_count)))
         self.status_var = tk.StringVar(value="请选择 PDF 文件和输出目录。")
-        self.target_var = tk.StringVar()
 
         frame = ttk.Frame(root, padding=16)
         frame.pack(fill="both", expand=True)
@@ -113,10 +117,6 @@ class PDFEnhanceApp:
             button = ttk.Radiobutton(choices, text=mode, value=mode, variable=self.mode_var, command=self.mode_changed)
             button.grid(row=index, sticky="w", pady=2)
             self.controls.append((button, "normal"))
-        self.description_label = ttk.Label(files, textvariable=self.description_var, wraplength=600)
-        self.description_label.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(6, 2))
-        self.target_label = ttk.Label(files, textvariable=self.target_var, wraplength=600)
-        self.target_label.grid(row=4, column=0, columnspan=3, sticky="ew")
 
         options = ttk.Frame(frame, padding=(0, 10))
         options.grid(row=2, sticky="ew")
@@ -129,20 +129,11 @@ class PDFEnhanceApp:
         self.bookmarks = ttk.LabelFrame(frame, text="2. 目录与书签校对", padding=10)
         self.bookmarks.grid(row=3, sticky="nsew")
         self.bookmarks.columnconfigure(0, weight=1)
-        self.bookmarks.rowconfigure(2, weight=1)
-        fields = ttk.Frame(self.bookmarks)
-        fields.grid(row=0, sticky="ew")
-        fields.columnconfigure(1, weight=1)
-        ttk.Label(fields, text="目录物理页码").grid(row=0, column=0, sticky="w")
-        ttk.Label(fields, textvariable=self.pages_var).grid(row=0, column=1, sticky="w", padx=8)
-        ttk.Label(fields, text="由软件自动查找").grid(row=0, column=2, sticky="w")
-        ttk.Label(fields, text="页码偏移").grid(row=1, column=0, sticky="w", pady=6)
-        ttk.Label(fields, textvariable=self.offset_var).grid(row=1, column=1, sticky="w", padx=8)
-        ttk.Label(fields, text="物理页码 = 目录页码 + 偏移").grid(row=1, column=2, sticky="w")
+        self.bookmarks.rowconfigure(1, weight=1)
         ttk.Label(self.bookmarks, text="每行：标题 + Tab + 页码；Tab 缩进表示下级标题。识别后可直接修改。",
-                  wraplength=600).grid(row=1, sticky="w", pady=5)
+                  wraplength=600).grid(row=0, sticky="w", pady=5)
         editor = ttk.Frame(self.bookmarks)
-        editor.grid(row=2, sticky="nsew")
+        editor.grid(row=1, sticky="nsew")
         editor.columnconfigure(0, weight=1)
         editor.rowconfigure(0, weight=1)
         self.toc_text = tk.Text(editor, wrap="none", undo=True, height=7, width=40, font="TkTextFont")
@@ -167,32 +158,19 @@ class PDFEnhanceApp:
         self.status_label = ttk.Label(frame, textvariable=self.status_var, wraplength=700)
         self.status_label.grid(row=6, sticky="ew", pady=(8, 0))
         frame.bind("<Configure>", lambda event: self.resize_labels(event.width))
-        self.directory_var.trace_add("write", lambda *_: self.update_target())
         self.mode_changed()
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.after(100, self.poll_events)
 
     def resize_labels(self, width):
-        for label in (self.description_label, self.target_label, self.status_label):
-            label.configure(wraplength=max(200, width - 50))
-
-    def update_target(self):
-        if self.source and self.directory_var.get():
-            target = output_path(self.source, self.directory_var.get(), self.mode_var.get())
-            text = f"输出文件：{display_path(target)}"
-            if self.mode_var.get() == MODES[1]:
-                text += f"\n另保留 OCR 文件：{display_path(output_path(self.source, self.directory_var.get(), MODES[0]))}"
-            self.target_var.set(text)
-        else:
-            self.target_var.set("")
+        self.status_label.configure(wraplength=max(200, width - 50))
 
     def clear_result(self):
         self.working = None
         self.items = []
         self.toc_pages = []
         self.page_offset = None
-        self.pages_var.set("自动识别")
-        self.offset_var.set("自动识别")
+        self.ocr_cache = {}
         self.toc_text.configure(state="normal")
         self.toc_text.delete("1.0", "end")
         self.save_btn.configure(state="disabled")
@@ -200,7 +178,6 @@ class PDFEnhanceApp:
     def mode_changed(self):
         self.clear_result()
         index = MODES.index(self.mode_var.get())
-        self.description_var.set(DESCRIPTIONS[index])
         self.start_btn.configure(text=("开始全文 OCR" if index == 0 else
                                       "开始 OCR 并识别目录" if index == 1 else "识别目录与书签"))
         if index == 0:
@@ -209,7 +186,6 @@ class PDFEnhanceApp:
         else:
             self.bookmarks.grid()
             self.save_btn.pack(side="right")
-        self.update_target()
 
     def choose_pdf(self):
         path = filedialog.askopenfilename(filetypes=[("PDF 文件", "*.pdf")])
@@ -219,7 +195,6 @@ class PDFEnhanceApp:
             if not self.directory_var.get():
                 self.directory_var.set(display_path(self.source.parent))
             self.clear_result()
-            self.update_target()
             self.status_var.set("已选择文件；设置任务后点击开始。")
 
     def choose_directory(self):
@@ -270,21 +245,25 @@ class PDFEnhanceApp:
                 elif kind == "done":
                     self.set_busy(False)
                     if value[0] == "analysis":
-                        _, self.working, self.items, self.toc_pages, offset, detail, self.use_ocr_coordinates = value
+                        _, self.working, self.items, self.toc_pages, offset, detail, self.use_ocr_coordinates, self.ocr_cache = value
                         self.page_offset = offset
-                        self.pages_var.set("、".join(str(page) for page in self.toc_pages))
-                        self.offset_var.set(f"{offset:+}")
                         self.toc_text.delete("1.0", "end")
                         for item in self.items:
                             indent = "\t" * (item.level - 1)
                             self.toc_text.insert("end", f"{indent}{item.title}\t{item.logical_page}\n")
                         self.save_btn.configure(state="normal")
-                        self.status_var.set(f"找到 {len(self.items)} 条目录（第 {self.toc_pages} 页）。{detail} 请校对后生成。")
+                        self.status_var.set(f"识别到 {len(self.items)} 条目录，请校对后生成 PDF。")
                     else:
                         self.status_var.set(value[1])
                         if value[0] == "ocr_only":
+                            self.save_fallback(value[2], value[1])
+                        elif value[0] == "ocr_saved":
                             messagebox.showwarning("OCR 已完成，书签未生成", value[1])
                         else:
+                            self.working = None
+                            self.ocr_cache = {}
+                            self.items = []
+                            self.save_btn.configure(state="disabled")
                             messagebox.showinfo("完成", value[1])
         except queue.Empty:
             pass
@@ -306,8 +285,7 @@ class PDFEnhanceApp:
 
     def start(self):
         try:
-            self.validate_target()
-            ocr_output = self.validate_target(MODES[0])
+            target = self.validate_target()
             workers = int(self.workers_var.get())
             if not 1 <= workers <= self.cpu_count:
                 raise ValueError(f"OCR 并发进程数必须在 1 到 {self.cpu_count} 之间。")
@@ -315,17 +293,19 @@ class PDFEnhanceApp:
             messagebox.showerror("设置错误", str(exc))
             return
         mode = self.mode_var.get()
-        if mode != MODES[2] and not self.confirm_target(ocr_output):
+        if mode == MODES[0] and not self.confirm_target(target):
             return
         if mode != MODES[2] and not messagebox.askyesno(
             "全文 OCR", "将重新识别全部页面。全页扫描图上的旧文字层会被移除，包括文字水印；原始 PDF 不会修改。\n\n继续？"
         ):
             return
         self.clear_result()
-        self.start_job(self.process_worker, self.source, mode, ocr_output, workers)
+        working = Path(self.workspace.name) / "searchable.pdf" if mode == MODES[1] else target
+        self.start_job(self.process_worker, self.source, mode, working, workers)
 
     def process_worker(self, source, mode, searchable, workers):
         cfg = load_general_config()
+        ocr_cache = {}
         with fitz.open(source) as doc:
             if doc.needs_pass:
                 raise ValueError("请先解密 PDF 后再处理。")
@@ -343,6 +323,7 @@ class PDFEnhanceApp:
                 str(source), str(searchable), dpi=cfg["dpi"], max_workers=workers,
                 progress_callback=lambda done, total: self.events.put(("progress", (done, total))),
                 skip_pages_with_text=False, replace_existing_scan_text=True,
+                ocr_page_callback=(lambda index, items: ocr_cache.__setitem__(index, items)) if mode == MODES[1] else None,
             )
             if not ok:
                 raise RuntimeError(message)
@@ -354,29 +335,44 @@ class PDFEnhanceApp:
             use_ocr = mode == MODES[2] and scanned
             self.events.put(("status", "正在自动寻找目录、解析书签并计算页码偏移…"))
             with fitz.open(working) as doc:
-                pages = (detect_toc_pages_with_ocr(doc, dpi=min(cfg["dpi"], 180))
+                pages = (detect_toc_pages_with_ocr(doc, dpi=cfg["dpi"], ocr_cache=ocr_cache)
                          if scanned else detect_toc_pages(doc))
                 if not pages and not scanned:
-                    pages = detect_toc_pages_with_ocr(doc, dpi=min(cfg["dpi"], 180))
+                    pages = detect_toc_pages_with_ocr(doc, dpi=cfg["dpi"], ocr_cache=ocr_cache)
                     scanned = bool(pages)
                     use_ocr = mode == MODES[2] and scanned
                 if not pages:
                     raise ValueError("未自动找到目录页")
-                items = (parse_toc_from_ocr_pages(doc, pages, dpi=cfg["dpi"])
+                items = (parse_toc_from_ocr_pages(doc, pages, dpi=cfg["dpi"], ocr_cache=ocr_cache)
                          if scanned else parse_toc_from_pages(doc, pages))
                 if not items and not scanned:
-                    items = parse_toc_from_ocr_pages(doc, pages, dpi=cfg["dpi"])
+                    items = parse_toc_from_ocr_pages(doc, pages, dpi=cfg["dpi"], ocr_cache=ocr_cache)
                 if not items:
                     raise ValueError("目录页没有解析出有效书签条目")
                 if use_ocr:
-                    offset, detail = detect_page_offset_with_ocr(doc, items, pages[-1], dpi=min(cfg["dpi"], 180))
+                    offset, detail = detect_page_offset_with_ocr(doc, items, pages[-1], dpi=min(cfg["dpi"], 180), ocr_cache=ocr_cache)
                 else:
                     offset, detail = detect_page_offset(doc, items, pages[-1])
-            return "analysis", working, items, pages, offset, detail, use_ocr
+            return "analysis", working, items, pages, offset, detail, use_ocr, ocr_cache
         except Exception as exc:
             if mode == MODES[1]:
-                return "ocr_only", f"错误：目录或书签识别失败（{exc}）。\n全文 OCR 已完成并保存：{display_path(searchable)}"
+                return "ocr_only", f"错误：目录或书签识别失败（{exc}）。", searchable
             raise
+
+    def save_fallback(self, working, reason):
+        try:
+            output = self.validate_target(MODES[0])
+        except ValueError as exc:
+            messagebox.showerror("OCR 导出失败", f"{reason}\n{exc}")
+            return
+        if self.confirm_target(output):
+            self.start_job(self.fallback_worker, working, output, reason)
+        else:
+            self.status_var.set(f"{reason} 未覆盖已有 OCR 文件。")
+
+    def fallback_worker(self, working, output, reason):
+        export_ocr_fallback(working, output)
+        return "ocr_saved", f"{reason}\n全文 OCR 已完成并保存：{display_path(output)}"
 
     def save(self):
         if not self.working:
@@ -398,13 +394,13 @@ class PDFEnhanceApp:
             original = next((entry for entry in self.items if entry.title == item.title), None)
             item.source_pdf_page = original.source_pdf_page if original else self.toc_pages[0]
         if self.confirm_target(target):
-            self.start_job(self.save_worker, self.working, target, items, offset, self.use_ocr_coordinates)
+            self.start_job(self.save_worker, self.working, target, items, offset, self.use_ocr_coordinates, self.ocr_cache)
 
-    def save_worker(self, working, output, items, offset, use_ocr):
+    def save_worker(self, working, output, items, offset, use_ocr, ocr_cache=None):
         self.events.put(("status", "正在定位标题并生成最终 PDF…"))
         ok, _, message = apply_bookmarks(
             str(working), str(output), items, page_offset=offset,
-            use_ocr_coordinates=use_ocr, ocr_dpi=min(load_general_config()["dpi"], 180),
+            use_ocr_coordinates=use_ocr, ocr_dpi=min(load_general_config()["dpi"], 180), ocr_cache=ocr_cache,
         )
         if not ok:
             raise RuntimeError(message)

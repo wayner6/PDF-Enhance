@@ -63,10 +63,10 @@ def test_window_modes_and_busy_controls():
     try:
         assert "PDF 增强" in root.title()
         assert len(gui.MODES) == 3
-        assert app.pages_var.get() == "自动识别"
-        assert app.offset_var.get() == "自动识别"
-        # 页码区域只有结果标签，不能编辑；仅输出目录/任务等设置可操作。
-        assert not any(isinstance(widget, gui.ttk.Entry) for widget in app.bookmarks.winfo_children()[0].winfo_children())
+        assert not hasattr(app, "pages_var")
+        assert not hasattr(app, "offset_var")
+        assert not hasattr(app, "target_label")
+        assert not hasattr(app, "description_label")
         app.mode_var.set(gui.MODES[0])
         app.mode_changed()
         assert not app.bookmarks.winfo_manager()

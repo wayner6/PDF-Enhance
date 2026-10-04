@@ -10,56 +10,30 @@ def find_title_coordinate_on_page(page: fitz.Page, title: str) -> Optional[fitz.
     在指定的物理页面中寻找标题所在的精确 (x, y) 坐标。
     返回精确跳转点 Point(x, y)，若未找到则返回 None。
     """
-    clean_title = title.strip()
-    if not clean_title:
-        return None
-        
-    # 策略 1: 完整匹配搜索
-    rects = page.search_for(clean_title)
-    if rects:
-        r = rects[0]
-        # 留出 15pt 顶部边距，避免文字紧贴屏幕顶端
-        return fitz.Point(r.x0, max(0.0, r.y0 - 15.0))
-        
-    # 策略 2: 去除空格后的标题搜索 (PDF 正文中可能文字紧凑无空格)
-    no_space_title = re.sub(r'\s+', '', clean_title)
-    if no_space_title != clean_title and len(no_space_title) >= 2:
-        rects = page.search_for(no_space_title)
-        if rects:
-            r = rects[0]
-            return fitz.Point(r.x0, max(0.0, r.y0 - 15.0))
-            
-    # 策略 3: 提取标题核心文本（去除前置章节号，如 "3 术语和定义" -> 搜 "术语和定义"）
-    match_core = re.search(r'^(?:第[零一二三四五六七八九十百\d]+[章节]|[A-Za-z\d\.\、\s]+)\s*([\u4e00-\u9fa5A-Za-z]{2,}.*)$', clean_title)
-    if match_core:
-        core_text = match_core.group(1).strip()
-        if len(core_text) >= 2:
-            rects = page.search_for(core_text)
-            if rects:
-                r = rects[0]
-                return fitz.Point(r.x0, max(0.0, r.y0 - 15.0))
-                
-    # 策略 4: 遍历文本块 (blocks) 进行模糊子串匹配
-    blocks = page.get_text("blocks")
-    for b in blocks:
-        # b 格式: (x0, y0, x1, y1, "text", block_no, block_type)
-        if len(b) >= 5 and b[6] == 0:  # 文本类型
-            b_text = re.sub(r'\s+', '', b[4])
-            if no_space_title in b_text or (len(no_space_title) >= 4 and no_space_title[:4] in b_text):
-                return fitz.Point(b[0], max(0.0, b[1] - 15.0))
-                
-    return None
+    # PDF 字符级文字层也会把编号和标题拆成多个 span。和 OCR 共用
+    # 几何行匹配，不去掉章节编号后搜索正文词语，也不使用标题前四字兜底。
+    items = []
+    for block in page.get_text("dict").get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        for line in block.get("lines", []):
+            for span in line.get("spans", []):
+                x0, y0, x1, y1 = span["bbox"]
+                items.append({"text": span["text"], "box": [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]})
+    return find_title_coordinate_from_ocr_items(items, title)
 
 def find_title_coordinate_from_ocr_items(
     ocr_items: list,
     title: str,
 ) -> Optional[fitz.Point]:
     """优先按“章节编号 + 完整标题”查找坐标，避免命中正文中的同名词语。"""
-    normalize = lambda value: re.sub(r"[^0-9A-Za-z\u4e00-\u9fa5]", "", value).lower()
+    # 保留编号内的点，避免 3.3、33、3.3.1 被当成同一个编号。
+    normalize = lambda value: re.sub(r"[^0-9A-Za-z\u4e00-\u9fa5.]", "", value).lower()
     target = normalize(title)
     if not target:
         return None
 
+    numbered = bool(re.match(r"^(?:第[零一二三四五六七八九十百\d]+[章节]|\d+(?:\.\d+)*)", target))
     fragments = []
     for item in ocr_items:
         box = item.get("box") or []
@@ -88,7 +62,7 @@ def find_title_coordinate_from_ocr_items(
     for row in rows:
         parts = sorted(row["parts"], key=lambda part: part["x0"])
         row_text = normalize(" ".join(part["text"] for part in parts))
-        if target not in row_text:
+        if (numbered and not row_text.startswith(target)) or target not in row_text:
             continue
         # 完全相等优先，其次是以完整标题开头，最后才是包含关系。
         rank = 2 if row_text == target else (1 if row_text.startswith(target) else 0)
@@ -100,23 +74,7 @@ def find_title_coordinate_from_ocr_items(
         y0 = min(part["y0"] for part in parts)
         return fitz.Point(x0, max(0.0, y0 - 15.0))
 
-    # 有章节编号时不再退化为只搜索正文标题，宁可跳页首，也不要跳到错误段落。
-    numbered = re.match(
-        r"^(?:第[零一二三四五六七八九十百\d]+[章节]|\d+(?:\.\d+)*)",
-        title.strip(),
-    )
-    if numbered:
-        return None
-
-    # 无编号标题采用完整标题匹配，并优先选择最短的 OCR 行。
-    matches = []
-    for fragment in fragments:
-        line_text = normalize(fragment["text"])
-        if target in line_text or line_text in target:
-            matches.append((abs(len(line_text) - len(target)), fragment["y0"], fragment))
-    if matches:
-        fragment = min(matches)[2]
-        return fitz.Point(fragment["x0"], max(0.0, fragment["y0"] - 15.0))
+    # 找不到完整标题时宁可跳到页首，不跳到正文中的同名词语。
     return None
 
 
@@ -127,6 +85,7 @@ def apply_bookmarks(
     page_offset: int = 0,
     use_ocr_coordinates: bool = False,
     ocr_dpi: int = 150,
+    ocr_cache: Optional[dict] = None,
 ) -> Tuple[bool, int, str]:
     """
     将书签写入 PDF 并另存为新文件。
@@ -171,7 +130,7 @@ def apply_bookmarks(
         fitz_toc = []
         clipped_count = 0
         precise_count = 0
-        ocr_cache = {}
+        ocr_cache = ocr_cache if ocr_cache is not None else {}
         
         # 预先进行层级归一化，防止 PyMuPDF 报 hierarchy level 错误
         normalized_levels = []
@@ -223,13 +182,10 @@ def apply_bookmarks(
             
             # 扫描件或损坏文字层优先使用 OCR 坐标，避免 PDF 内部乱码匹配到正文。
             coord_point = None
-            if use_ocr_coordinates:
-                from .ocr_engine import ocr_pdf_page
-                if target_pno not in ocr_cache:
-                    ocr_cache[target_pno], _ = ocr_pdf_page(page_obj, dpi=ocr_dpi)
-                coord_point = find_title_coordinate_from_ocr_items(
-                    ocr_cache[target_pno], item.title
-                )
+            if use_ocr_coordinates or target_pno - 1 in ocr_cache:
+                from .ocr_engine import cached_page_ocr
+                items, _ = cached_page_ocr(page_obj, ocr_dpi, ocr_cache)
+                coord_point = find_title_coordinate_from_ocr_items(items, item.title)
             if coord_point is None:
                 coord_point = find_title_coordinate_on_page(page_obj, item.title)
             

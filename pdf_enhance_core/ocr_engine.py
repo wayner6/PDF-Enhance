@@ -1,6 +1,5 @@
 import os
 import sys
-import io
 import ctypes
 from typing import List, Dict, Any, Tuple, Optional
 import numpy as np
@@ -72,9 +71,9 @@ def ocr_cv_image(cv_img: np.ndarray) -> List[Dict[str, Any]]:
     return formatted
 
 def ocr_pdf_page(doc_or_page: fitz.Page, dpi: int = 150) -> Tuple[List[Dict[str, Any]], Tuple[float, float]]:
-    pix = doc_or_page.get_pixmap(dpi=dpi)
-    img_bytes = pix.tobytes("png")
-    pil_img = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+    pix = doc_or_page.get_pixmap(dpi=dpi, colorspace=fitz.csRGB, alpha=False)
+    # 内存中的像素直接交给预处理，省去每页 PNG 压缩和解码。
+    pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
     
     cv_img = preprocess_page_image(pil_img)
     ocr_results = ocr_cv_image(cv_img)
@@ -108,6 +107,18 @@ def ocr_pdf_page(doc_or_page: fitz.Page, dpi: int = 150) -> Tuple[List[Dict[str,
         })
         
     return scaled_results, (pdf_w, pdf_h)
+
+def cached_page_ocr(page: fitz.Page, dpi: int, cache: Optional[dict] = None):
+    """单个任务内复用页面 OCR；键为零基页码，不能跨不同 PDF 共用。
+
+    坐标已经换算成 PDF 点，高分辨率结果可供目录探测等低 DPI 阶段复用。
+    """
+    if cache is None:
+        return ocr_pdf_page(page, dpi=dpi)
+    if page.number not in cache:
+        cache[page.number], _ = ocr_pdf_page(page, dpi=dpi)
+    return cache[page.number], (page.rect.width, page.rect.height)
+
 
 def worker_ocr_init():
     set_process_low_priority()

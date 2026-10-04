@@ -118,6 +118,7 @@ def generate_searchable_pdf(
     progress_callback: Optional[Callable[[int, int], None]] = None,
     skip_pages_with_text: bool = True,
     replace_existing_scan_text: bool = False,
+    ocr_page_callback: Optional[Callable[[int, List[Dict[str, Any]]], None]] = None,
 ) -> Tuple[bool, str]:
     """将扫描 PDF 转换为带精确隐藏文字层的可搜索 PDF。"""
     if not os.path.exists(input_pdf_path):
@@ -167,6 +168,8 @@ def generate_searchable_pdf(
                 results_by_page[page_index] = results
                 if error:
                     failed_pages[page_index] = error
+                elif ocr_page_callback:
+                    ocr_page_callback(page_index, results)
                 progress.advance(progress_task)
                 if progress_callback:
                     progress_callback(len(results_by_page), ocr_page_count)

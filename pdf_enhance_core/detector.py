@@ -180,14 +180,15 @@ def detect_toc_pages_with_ocr(
     doc: fitz.Document,
     max_search_pages: int = 35,
     dpi: int = 150,
+    ocr_cache: Optional[dict] = None,
 ) -> List[int]:
     """OCR 探测目录，并把相邻的中文目录和英文目录分成不同组。"""
-    from .ocr_engine import ocr_pdf_page
+    from .ocr_engine import cached_page_ocr
 
     candidates = []
     search_limit = min(max_search_pages, len(doc))
     for page_index in range(search_limit):
-        items, _ = ocr_pdf_page(doc[page_index], dpi=dpi)
+        items, _ = cached_page_ocr(doc[page_index], dpi, ocr_cache)
         text = "\n".join(str(item.get("text", "")) for item in items)
         is_toc, score = score_toc_text(text)
         if score < 40:

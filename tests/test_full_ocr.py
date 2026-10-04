@@ -41,8 +41,14 @@ def test_full_searchable_pdf():
         with fitz.open(source) as document:
             assert check_pdf_text_layer(document) is False
 
-        ok, message = generate_searchable_pdf(str(source), str(output), max_workers=2)
+        cached = {}
+        ok, message = generate_searchable_pdf(
+            str(source), str(output), max_workers=2,
+            ocr_page_callback=lambda index, items: cached.__setitem__(index, items),
+        )
         assert ok, message
+        assert set(cached) == {0, 1, 2}
+        assert cached[0]
 
         with fitz.open(output) as result:
             extracted = result[0].get_text()
