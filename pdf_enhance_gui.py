@@ -4,6 +4,8 @@ import ctypes
 import os
 import queue
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
@@ -12,6 +14,7 @@ from tkinter import filedialog, font, messagebox, ttk
 
 import pymupdf as fitz
 from pdf_enhance_core import (
+    __version__,
     apply_bookmarks, detect_page_offset, detect_page_offset_with_ocr,
     detect_toc_pages_with_ocr, generate_searchable_pdf,
     load_general_config,
@@ -59,7 +62,13 @@ def enable_high_dpi():
 class PDFEnhanceApp:
     def __init__(self, root):
         self.root = root
-        root.title("PDF-Enhance · PDF 增强")
+        root.title(f"PDF 增强 {__version__}")
+        menu = tk.Menu(root)
+        help_menu = tk.Menu(menu, tearoff=False)
+        help_menu.add_command(label="关于与许可", command=self.show_about)
+        help_menu.add_command(label="查看完整许可证", command=self.show_license)
+        menu.add_cascade(label="帮助", menu=help_menu)
+        root.configure(menu=menu)
         scale = root.winfo_fpixels("1i") / 96
         if os.name == "nt":
             for name in ("TkDefaultFont", "TkTextFont", "TkMenuFont"):
@@ -115,7 +124,7 @@ class PDFEnhanceApp:
         workers = ttk.Spinbox(options, from_=1, to=self.cpu_count, textvariable=self.workers_var, width=5)
         workers.pack(side="left", padx=8)
         self.controls.append((workers, "normal"))
-        ttk.Label(options, text=f"共 {self.cpu_count} 个逻辑核心；数值越大，占用越高").pack(side="left")
+        ttk.Label(options, text=f"最多 {self.cpu_count} 个进程").pack(side="left")
 
         actions = ttk.Frame(frame, padding=(0, 8))
         actions.grid(row=3, sticky="ew")
@@ -128,7 +137,7 @@ class PDFEnhanceApp:
         frame.bind("<Configure>", lambda event: self.resize_labels(event.width))
         # 以 DPI 缩放后的紧凑尺寸和控件所需尺寸为下限；启动即最小尺寸。
         root.update_idletasks()
-        width = max(round(620 * scale), root.winfo_reqwidth())
+        width = max(round(520 * scale), root.winfo_reqwidth())
         height = max(round(350 * scale), root.winfo_reqheight())
         width = min(width, round(root.winfo_screenwidth() * .92))
         height = min(height, round(root.winfo_screenheight() * .85))
@@ -136,6 +145,25 @@ class PDFEnhanceApp:
         root.geometry(f"{width}x{height}")
         root.protocol("WM_DELETE_WINDOW", self.close)
         root.after(100, self.poll_events)
+
+    def show_about(self):
+        messagebox.showinfo("关于 PDF 增强", (
+            f"PDF 增强 {__version__}\n"
+            "Copyright (C) 2026 PDF-Enhance contributors\n\n"
+            "本软件按 AGPL-3.0-only 发布，不提供任何担保。\n"
+            "可以按许可证条件使用、修改和再分发。\n"
+            "完整许可见帮助菜单和发行包中的 notices 目录。\n\n"
+            f"对应源码与构建说明：\nhttps://github.com/wayner6/PDF-Enhance/tree/v{__version__}"
+        ))
+
+    def show_license(self):
+        base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+        path = base / "notices" / "LICENSE.txt" if getattr(sys, "frozen", False) else base / "LICENSE"
+        if os.name == "nt":
+            subprocess.Popen(["notepad.exe", str(path)])
+        else:
+            import webbrowser
+            webbrowser.open(path.as_uri())
 
     def resize_labels(self, width):
         self.status_label.configure(wraplength=max(200, width - 50))

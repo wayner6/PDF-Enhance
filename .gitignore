@@ -6,6 +6,9 @@ __pycache__/
 .venv/
 .dev-venv/
 venv/
+build/
+dist/
+*.spec
 
 # Runtime and test artifacts
 temp/*

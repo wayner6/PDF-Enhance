@@ -14,9 +14,14 @@ if errorlevel 1 exit /b 1
 ".venv\Scripts\python.exe" -m pytest -q
 if errorlevel 1 exit /b 1
 
+rem Collect license texts and exact build dependency versions for both distributions.
+".venv\Scripts\python.exe" tools\collect_licenses.py
+if errorlevel 1 exit /b 1
+
 rem Bundle ONNX Runtime native DLLs and RapidOCR models in BOTH distributions.
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onedir --windowed --manifest windows_app.manifest ^
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onedir --windowed --manifest windows_app.manifest --version-file windows_version_info.txt ^
   --name PDF-Enhance ^
+  --add-data "build\distribution-notices;notices" ^
   --collect-all rapidocr_onnxruntime ^
   --collect-all onnxruntime ^
   windows_entry.py
@@ -25,11 +30,15 @@ if errorlevel 1 exit /b 1
 powershell -NoProfile -Command "Compress-Archive -Path 'dist\PDF-Enhance' -DestinationPath 'dist\PDF-Enhance-Windows.zip' -Force"
 if errorlevel 1 exit /b 1
 
-".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --manifest windows_app.manifest ^
+".venv\Scripts\python.exe" -m PyInstaller --noconfirm --clean --onefile --windowed --manifest windows_app.manifest --version-file windows_version_info.txt ^
   --name PDF-Enhance ^
+  --add-data "build\distribution-notices;notices" ^
   --collect-all rapidocr_onnxruntime ^
   --collect-all onnxruntime ^
   windows_entry.py
+if errorlevel 1 exit /b 1
+
+copy /y "build\PDF-Enhance-Licenses.zip" "dist\PDF-Enhance-Licenses.zip"
 if errorlevel 1 exit /b 1
 
 echo Builds ready: dist\PDF-Enhance.exe and dist\PDF-Enhance-Windows.zip

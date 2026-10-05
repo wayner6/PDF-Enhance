@@ -81,6 +81,7 @@ def test_window_modes_and_busy_controls(tmp_path, monkeypatch):
         root.deiconify()
         root.update()
         assert (root.winfo_width(), root.winfo_height()) == root.minsize()
+        assert root.winfo_width() < round(620 * root.winfo_fpixels("1i") / 96)
         source = tmp_path / "source.pdf"
         source.write_bytes(b"test input")
         app.source = source

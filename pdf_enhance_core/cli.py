@@ -8,6 +8,7 @@ from rich.prompt import Prompt, IntPrompt, Confirm
 from rich.tree import Tree
 
 from pdf_enhance_core import (
+    __version__,
     text_layer_stats,
     text_quality_stats,
     scan_layer_stats,
@@ -34,14 +35,16 @@ set_process_low_priority()
 
 APP_NAME = "PDF-Enhance"
 APP_NAME_ZH = "PDF 增强"
-APP_VERSION = "0.1.0"
+APP_VERSION = __version__
 
 console = Console()
 
 def print_banner():
     console.print(Panel.fit(
         f"[bold cyan]{APP_NAME}[/bold cyan] [dim]v{APP_VERSION}[/dim]\n"
-        "[dim]OCR、目录识别和书签制作[/dim]",
+        "[dim]OCR、目录识别和书签制作[/dim]\n"
+        "[dim]Copyright (C) 2026 PDF-Enhance contributors\n"
+        "AGPL-3.0-only · 不提供任何担保 · --help 查看许可与源码[/dim]",
         border_style="cyan"
     ))
 
@@ -108,7 +111,10 @@ def run_wizard():
             "  python pdf_enhance.py [PDF文件路径]\n\n"
             "选项：\n"
             "  -h, --help       显示帮助\n"
-            "  -V, --version    显示版本"
+            "  -V, --version    显示版本\n\n"
+            "许可：AGPL-3.0-only；允许按许可证条件使用、修改和再分发，无任何担保。\n"
+            "完整许可见 LICENSE。对应源码与构建说明：\n"
+            f"https://github.com/wayner6/PDF-Enhance/tree/v{APP_VERSION}"
         )
         return
     if len(sys.argv) > 1 and sys.argv[1] in {"-V", "--version"}:

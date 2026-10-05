@@ -1,3 +1,5 @@
+__version__ = "1.0.0"
+
 from .detector import check_pdf_text_layer, text_layer_stats, text_quality_stats, scan_layer_stats, detect_toc_pages, detect_toc_pages_with_ocr, parse_page_range
 from .parser import parse_toc_from_pages, parse_toc_from_ocr_pages, TOCItem
 from .offset_finder import detect_page_offset, detect_page_offset_with_ocr

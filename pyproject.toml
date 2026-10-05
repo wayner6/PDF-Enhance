@@ -1,10 +1,12 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pdf-enhance"
-version = "0.1.0"
+version = "1.0.0"
+license = "AGPL-3.0-only"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md", "licenses/*"]
 description = "Extensible local PDF OCR, searchable text layer, TOC and bookmark toolkit"
 readme = "README.md"
 requires-python = ">=3.10"
