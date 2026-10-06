@@ -7,6 +7,7 @@ from PIL import Image
 import pymupdf as fitz
 from rapidocr_onnxruntime import RapidOCR
 
+from .cancellation import check_cancelled
 from .image_preprocess import preprocess_page_image
 
 os.environ["OMP_NUM_THREADS"] = "1"
@@ -31,6 +32,7 @@ def set_process_low_priority():
             pass
 
 def get_ocr_engine() -> RapidOCR:
+    check_cancelled()
     global _OCR_INSTANCE
     if _OCR_INSTANCE is None:
         _OCR_INSTANCE = RapidOCR(
@@ -41,12 +43,14 @@ def get_ocr_engine() -> RapidOCR:
             intra_op_num_threads=1,
             inter_op_num_threads=1,
         )
+    check_cancelled()
     return _OCR_INSTANCE
 
 def ocr_cv_image(cv_img: np.ndarray) -> List[Dict[str, Any]]:
     """执行 OCR，并保留识别器计算出的字符/单词级坐标框。"""
     engine = get_ocr_engine()
     results, _ = engine(cv_img, return_word_box=True)
+    check_cancelled()
     if not results:
         return []
 
@@ -71,6 +75,7 @@ def ocr_cv_image(cv_img: np.ndarray) -> List[Dict[str, Any]]:
     return formatted
 
 def ocr_pdf_page(doc_or_page: fitz.Page, dpi: int = 150) -> Tuple[List[Dict[str, Any]], Tuple[float, float]]:
+    check_cancelled()
     pix = doc_or_page.get_pixmap(dpi=dpi, colorspace=fitz.csRGB, alpha=False)
     # 内存中的像素直接交给预处理，省去每页 PNG 压缩和解码。
     pil_img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
@@ -113,10 +118,12 @@ def cached_page_ocr(page: fitz.Page, dpi: int, cache: Optional[dict] = None):
 
     坐标已经换算成 PDF 点，高分辨率结果可供目录探测等低 DPI 阶段复用。
     """
+    check_cancelled()
     if cache is None:
         return ocr_pdf_page(page, dpi=dpi)
     if page.number not in cache:
         cache[page.number], _ = ocr_pdf_page(page, dpi=dpi)
+    check_cancelled()
     return cache[page.number], (page.rect.width, page.rect.height)
 
 

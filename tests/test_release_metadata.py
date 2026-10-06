@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_release_version_and_license():
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert __version__ == "1.0.0"
+    assert __version__ == "1.1.0"
     assert f'version = "{__version__}"' in project
     assert 'license = "AGPL-3.0-only"' in project
     assembly = ET.parse(ROOT / "windows_app.manifest").find("{urn:schemas-microsoft-com:asm.v1}assemblyIdentity")

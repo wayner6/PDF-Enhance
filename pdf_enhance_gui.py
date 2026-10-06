@@ -20,6 +20,7 @@ from pdf_enhance_core import (
     load_general_config,
     parse_toc_from_ocr_pages, parse_toc_from_pages,
 )
+from pdf_enhance_core.cancellation import ProcessingCancelled, cancellation_scope, check_cancelled
 from pdf_enhance_core.detector import usable_page_text
 from pdf_enhance_core.parser import guess_level_by_numbering, toc_items_need_ocr
 
@@ -32,10 +33,12 @@ def output_path(source, directory, mode):
 
 def export_ocr_fallback(working, output):
     """目录失败后才导出临时 OCR，原子保存以保护已有文件。"""
+    check_cancelled()
     fd, temporary = tempfile.mkstemp(prefix=".pdf-enhance-ocr-", suffix=".pdf", dir=Path(output).parent)
     os.close(fd)
     try:
         shutil.copyfile(working, temporary)
+        check_cancelled()
         os.replace(temporary, output)
     finally:
         if os.path.exists(temporary):
@@ -79,6 +82,7 @@ class PDFEnhanceApp:
         style.configure("Title.TLabel", font=("Microsoft YaHei UI", 16, "bold"))
         style.configure("Action.TButton", padding=(12, 7))
         self.events = queue.Queue()
+        self.cancel_event = threading.Event()
         self.source = None
         self.busy = False
         self.workspace = tempfile.TemporaryDirectory(prefix="pdf-enhance-gui-")
@@ -129,7 +133,9 @@ class PDFEnhanceApp:
         actions = ttk.Frame(frame, padding=(0, 8))
         actions.grid(row=3, sticky="ew")
         self.start_btn = ttk.Button(actions, text="开始处理", style="Action.TButton", command=self.start)
-        self.start_btn.pack(fill="x")
+        self.start_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        self.cancel_btn = ttk.Button(actions, text="中断处理", style="Action.TButton", command=self.cancel_job, state="disabled")
+        self.cancel_btn.pack(side="right")
         self.progress = ttk.Progressbar(frame, mode="determinate")
         self.progress.grid(row=4, sticky="ew")
         self.status_label = ttk.Label(frame, textvariable=self.status_var, wraplength=700)
@@ -190,25 +196,54 @@ class PDFEnhanceApp:
         for widget, state in self.controls:
             widget.configure(state="disabled" if busy else state)
         self.start_btn.configure(state="disabled" if busy else "normal")
+        self.cancel_btn.configure(state="normal" if busy else "disabled")
         self.progress.stop()
         self.progress.configure(mode="indeterminate" if busy else "determinate", value=0)
         if busy:
             self.progress.start(12)
 
     def start_job(self, target, *args):
+        self.cancel_event.clear()
         self.set_busy(True)
         threading.Thread(target=self.run_job, args=(target, *args), daemon=True).start()
 
+    def cancel_job(self):
+        if self.busy:
+            self.cancel_event.set()
+            self.cancel_btn.configure(state="disabled")
+            self.status_var.set("正在中断，等待当前步骤结束并清理临时结果…")
+
+    def finish_cancelled(self):
+        message = "已中断；本次结果未保存，原文件与已有输出保持不变。"
+        working = Path(self.workspace.name) / "searchable.pdf"
+        try:
+            if self.source is None or working.resolve() != self.source.resolve():
+                working.unlink(missing_ok=True)
+        except OSError:
+            message += " 临时 OCR 文件将在退出时再清理。"
+        self.events.put(("cancelled", message))
+
     def run_job(self, target, *args):
         try:
-            self.events.put(("done", target(*args)))
+            with cancellation_scope(self.cancel_event):
+                result = target(*args)
+                if result[0] == "ocr_only":
+                    check_cancelled()
+            self.events.put(("done", result))
+        except ProcessingCancelled:
+            self.finish_cancelled()
         except Exception as exc:
-            self.events.put(("error", f"错误：{exc}"))
+            if self.cancel_event.is_set():
+                self.finish_cancelled()
+            else:
+                self.events.put(("error", f"错误：{exc}"))
 
     def poll_events(self):
         try:
             while True:
                 kind, value = self.events.get_nowait()
+                if self.cancel_event.is_set() and kind in ("status", "progress"):
+                    continue
                 if kind == "status":
                     self.progress.stop()
                     self.progress.configure(mode="indeterminate")
@@ -219,6 +254,9 @@ class PDFEnhanceApp:
                     self.progress.stop()
                     self.progress.configure(mode="determinate", maximum=max(1, total), value=done)
                     self.status_var.set(f"全文 OCR：{done}/{total} 页")
+                elif kind == "cancelled":
+                    self.set_busy(False)
+                    self.status_var.set(value)
                 elif kind == "error":
                     self.set_busy(False)
                     self.status_var.set("错误：处理失败，请查看错误提示。")
@@ -226,13 +264,16 @@ class PDFEnhanceApp:
                 elif kind == "done":
                     self.set_busy(False)
                     if value[0] == "ocr_only":
-                        self.status_var.set("书签生成失败，正在保存 OCR 结果。")
-                        self.save_fallback(value[2], value[1])
+                        if self.cancel_event.is_set():
+                            self.finish_cancelled()
+                        else:
+                            self.status_var.set("书签生成失败，正在保存 OCR 结果。")
+                            self.save_fallback(value[2], value[1])
                     elif value[0] == "ocr_saved":
                         self.status_var.set("全文 OCR 已保存，书签未生成。")
                         messagebox.showwarning("OCR 已完成，书签未生成", value[1])
                     else:
-                        self.status_var.set("处理完成。")
+                        self.status_var.set("处理已完成，中断请求未赶上保存。" if self.cancel_event.is_set() else "处理完成。")
                         messagebox.showinfo("完成", value[1])
         except queue.Empty:
             pass
@@ -280,6 +321,7 @@ class PDFEnhanceApp:
                 raise ValueError("目录包含空标题或无效页码，不能自动生成书签。")
             return self.save_worker(working, output, items, offset, use_ocr, cache)
         except Exception as exc:
+            check_cancelled()
             if mode == MODES[1]:
                 return "ocr_only", f"错误：书签生成失败（{exc}）。", working
             raise
@@ -344,6 +386,7 @@ class PDFEnhanceApp:
             # 定位时也先使用可用文字层，缺失或未匹配才局部 OCR，不能整本强制 OCR。
             return "analysis", working, items, pages, offset, detail, False, ocr_cache
         except Exception as exc:
+            check_cancelled()
             if mode == MODES[1]:
                 return "ocr_only", f"错误：目录或书签识别失败（{exc}）。", searchable
             raise
@@ -376,7 +419,7 @@ class PDFEnhanceApp:
 
     def close(self):
         if self.busy:
-            messagebox.showwarning("正在处理", "请等待当前任务结束后关闭窗口，以免中断处理。")
+            messagebox.showwarning("正在处理", "请先点击“中断处理”，等待清理完成后再关闭窗口。")
             return
         self.workspace.cleanup()
         self.root.destroy()

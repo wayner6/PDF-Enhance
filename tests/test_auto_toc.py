@@ -2,6 +2,7 @@
 
 import os
 import queue
+import threading
 from pathlib import Path
 
 import pymupdf as fitz
@@ -107,6 +108,7 @@ def test_missing_chapter_prefix_is_repaired(monkeypatch):
 def test_error_prefix_is_chinese():
     app = gui.PDFEnhanceApp.__new__(gui.PDFEnhanceApp)
     app.events = queue.Queue()
+    app.cancel_event = threading.Event()
     def fail():
         raise ValueError("未找到目录页")
     app.run_job(fail)

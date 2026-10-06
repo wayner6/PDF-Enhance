@@ -38,8 +38,5 @@ if errorlevel 1 exit /b 1
   windows_entry.py
 if errorlevel 1 exit /b 1
 
-copy /y "build\PDF-Enhance-Licenses.zip" "dist\PDF-Enhance-Licenses.zip"
-if errorlevel 1 exit /b 1
-
 echo Builds ready: dist\PDF-Enhance.exe and dist\PDF-Enhance-Windows.zip
 endlocal

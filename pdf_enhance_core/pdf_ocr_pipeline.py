@@ -1,12 +1,13 @@
 import os
 import tempfile
-from multiprocessing import Pool, cpu_count
+from multiprocessing import Pool, TimeoutError, cpu_count
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pymupdf as fitz
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
+from .cancellation import check_cancelled
 from .ocr_engine import worker_ocr_init, worker_ocr_page_task
 
 console = Console()
@@ -121,6 +122,7 @@ def generate_searchable_pdf(
     ocr_page_callback: Optional[Callable[[int, List[Dict[str, Any]]], None]] = None,
 ) -> Tuple[bool, str]:
     """将扫描 PDF 转换为带精确隐藏文字层的可搜索 PDF。"""
+    check_cancelled()
     if not os.path.exists(input_pdf_path):
         return False, f"输入文件不存在: {input_pdf_path}"
     if os.path.abspath(input_pdf_path) == os.path.abspath(output_pdf_path):
@@ -164,7 +166,14 @@ def generate_searchable_pdf(
     ) as progress:
         progress_task = progress.add_task("OCR", total=ocr_page_count)
         with Pool(processes=min(worker_count, max(1, ocr_page_count)), initializer=worker_ocr_init) as pool:
-            for page_index, results, _, error in pool.imap_unordered(worker_ocr_page_task, tasks):
+            pending = pool.imap_unordered(worker_ocr_page_task, tasks)
+            while len(results_by_page) < ocr_page_count:
+                check_cancelled()
+                try:
+                    page_index, results, _, error = pending.next(timeout=0.1)
+                except TimeoutError:
+                    continue
+                check_cancelled()
                 results_by_page[page_index] = results
                 if error:
                     failed_pages[page_index] = error
@@ -190,6 +199,7 @@ def generate_searchable_pdf(
     os.close(temp_fd)
     os.unlink(temp_output)
     try:
+        check_cancelled()
         output_doc.insert_pdf(source_doc)
         metadata = dict(source_doc.metadata or {})
         previous_producer = str(metadata.get("producer") or "").strip()
@@ -205,6 +215,7 @@ def generate_searchable_pdf(
         output_doc.set_metadata(metadata)
         replaced_text_pages = 0
         for page_index in range(total_pages):
+            check_cancelled()
             page = output_doc[page_index]
             if replace_existing_scan_text and remove_existing_text_from_scan_page(page):
                 replaced_text_pages += 1
@@ -214,9 +225,11 @@ def generate_searchable_pdf(
             inject_invisible_text_layer(page, results_by_page.get(page_index, []))
 
         console.print("[dim][OCR] 阶段 3/3：正在安全保存可搜索 PDF...[/dim]")
+        check_cancelled()
         output_doc.save(temp_output, garbage=1, deflate=False)
         output_doc.close()
         source_doc.close()
+        check_cancelled()
         os.replace(temp_output, output_pdf_path)
     except Exception as exc:
         return False, f"生成双层 PDF 时发生错误: {exc}"

@@ -3,6 +3,8 @@ import unicodedata
 from typing import List, Tuple, Optional
 import pymupdf as fitz
 
+from .cancellation import check_cancelled
+
 TOC_KEYWORDS = [
     "目录", "目  录", "目 录", "contents", "table of contents", 
     "content", "index", "目次", "总目"
@@ -30,8 +32,10 @@ def text_is_readable(text: str, min_chars: int = 2) -> bool:
 
 
 def usable_page_text(page: fitz.Page) -> str:
+    check_cancelled()
     try:
         text = page.get_text().strip()
+        check_cancelled()
     except (ValueError, RuntimeError):
         return ""  # 字体或文字流损坏时仍可尝试渲染后 OCR。
     return text if text_is_readable(text) and any(char.isalpha() for char in text) else ""

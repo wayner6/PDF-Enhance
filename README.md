@@ -1,6 +1,6 @@
 # PDF-Enhance · PDF 增强
 
-**正式版：1.0.0** · [Windows 下载](https://github.com/wayner6/PDF-Enhance/releases/tag/v1.0.0) · [AGPL-3.0-only](LICENSE)
+**正式版：1.1.0** · [Windows 下载](https://github.com/wayner6/PDF-Enhance/releases/tag/v1.1.0) · [AGPL-3.0-only](LICENSE)
 
 让扫描 PDF 可以搜索、复制，并通过书签快速跳转到章节。
 
@@ -30,7 +30,7 @@ PDF-Enhance 面向扫描文档、电子书、技术规范和长篇资料，提�
 
 ### Windows 桌面版
 
-从 [v1.0.0 Release](https://github.com/wayner6/PDF-Enhance/releases/tag/v1.0.0) 下载 Windows x64 发行包，无需安装 Python：
+从 [v1.1.0 Release](https://github.com/wayner6/PDF-Enhance/releases/tag/v1.1.0) 下载 Windows x64 发行包，无需安装 Python：
 
 - **单文件版**：直接运行 `PDF-Enhance.exe`，首次启动可能较慢。
 - **便携版**：解压 `PDF-Enhance-Windows.zip`，运行其中的 `PDF-Enhance/PDF-Enhance.exe`。请保留旁边的 `_internal` 文件夹，不要只复制 exe。
@@ -39,7 +39,7 @@ PDF-Enhance 面向扫描文档、电子书、技术规范和长篇资料，提�
 
 1. 选择输入 PDF 和输出目录。
 2. 按目标选择任务，设置 OCR 并发进程数。
-3. 点击“开始处理”，等待完成提示。
+3. 点击“开始处理”，等待完成提示；需要停止时点击“中断处理”。
 4. 打开输出 PDF：尝试搜索正文文字、复制一段文字，或点击书签检查跳转。
 
 假设输入文件为 `文档.pdf`：
@@ -53,6 +53,8 @@ PDF-Enhance 面向扫描文档、电子书、技术规范和长篇资料，提�
 **全文 OCR 会重新识别全部页面。** 对有全页扫描底图的页面，会清除旧 PDF 文字层，其中的文字水印也可能被清除；印在扫描图片里的水印不受影响。只需要导航时，选择“仅制作书签”。
 
 组合任务成功时只导出 `_ocr_bookmark.pdf`；若全文 OCR 已完成但目录或书签生成失败，会提供保存 `_ocr.pdf` 的流程，已有同名文件需确认后才覆盖。
+
+中断会终止全文 OCR 的进程池，并停止后续解析、定位和保存；正在执行的单页本地 OCR 或 PDF 保存调用需等待当前调用结束后清理。中断发生在最终保存前时，不导出本次结果，也不覆盖已有输出；保存已完成时会如实提示已完成。清理结束后可以开始新任务。
 
 桌面版自动识别目录页和页码偏移，不提供人工校对或视觉 AI。自动处理失败时，可使用下方命令行向导。启动时窗口尺寸即为最小尺寸，基准 **520×350**，按 DPI 和控件所需尺寸调整，仍可手动放大。
 
@@ -236,11 +238,10 @@ build_windows.bat
 ```text
 dist/
 ├── PDF-Enhance.exe
-├── PDF-Enhance-Windows.zip
-└── PDF-Enhance-Licenses.zip
+└── PDF-Enhance-Windows.zip
 ```
 
-脚本会使用或创建项目内的 `.venv`，重新运行会覆盖同名构建产物。[Windows 构建工作流](.github/workflows/windows-build.yml) 也会上传这三个文件，但不会自动发布 Release。
+脚本会使用或创建项目内的 `.venv`，重新运行会覆盖同名构建产物。[Windows 构建工作流](.github/workflows/windows-build.yml) 也会上传这两个文件，但不会自动发布 Release。
 
 发布前，应在干净的 Windows 机器上分别验证单文件版和便携版，检查中文 PDF、全文 OCR、书签跳转和高 DPI 显示。自动化测试与打包成功不能代替发行版验收。
 
@@ -261,6 +262,6 @@ tests/                # 自动化测试
 
 反馈识别问题时，请附上操作系统、Python 或构建版本、任务类型、错误信息及可公开的最小 PDF 样例；不要上传密钥或敏感文档。代码修改请补充相关测试并运行测试集。
 
-项目采用 **AGPL-3.0-only**，允许按许可证条件使用、修改和再分发，不提供任何担保。完整许可见 [LICENSE](LICENSE)，软件“帮助”菜单也可查看许可和源码地址。对应源码和构建脚本由本仓库的 `v1.0.0` 标签提供。
+项目采用 **AGPL-3.0-only**，允许按许可证条件使用、修改和再分发，不提供任何担保。完整许可见 [LICENSE](LICENSE)，软件“帮助”菜单也可查看许可和源码地址。对应源码和构建脚本由本仓库的 `v1.1.0` 标签提供。
 
-第三方组件保留各自的版权与许可，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。发行包内的 `notices` 目录（便携版为 `_internal/notices`）与 `PDF-Enhance-Licenses.zip` 包含许可文件、准确的构建依赖版本及源码获取地址。
+第三方组件保留各自的版权与许可，详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。许可文件、准确的构建依赖版本及源码获取地址仍随软件内嵌于 `notices` 目录（便携版为 `_internal/notices`），不再提供独立许可压缩包或校验文件附件。

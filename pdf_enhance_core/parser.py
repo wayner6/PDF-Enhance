@@ -6,6 +6,8 @@ import numpy as np
 from PIL import Image
 import pymupdf as fitz
 
+from .cancellation import check_cancelled
+
 @dataclass
 class TOCItem:
     title: str
@@ -214,6 +216,7 @@ def parse_toc_from_pages(doc: fitz.Document, toc_pages: List[int]) -> List[TOCIt
     all_extracted_items = []
     
     for pno in toc_pages:
+        check_cancelled()
         if pno < 1 or pno > len(doc):
             continue
         page = doc[pno - 1]
@@ -253,6 +256,7 @@ def parse_toc_from_pages(doc: fitz.Document, toc_pages: List[int]) -> List[TOCIt
         
         rows = []
         for span in spans_list:
+            check_cancelled()
             matched = False
             for r in rows:
                 if abs(r["y0"] - span["y0"]) <= 6.0:
@@ -331,6 +335,7 @@ def _ocr_right_margin_page_numbers(
     dpi: int = 250,
 ) -> List[Tuple[float, int]]:
     """单独识别目录右侧页码列，避免点引线令小数字漏检。"""
+    check_cancelled()
     from .image_preprocess import preprocess_page_image
     from .ocr_engine import get_ocr_engine
 
@@ -351,11 +356,13 @@ def _ocr_right_margin_page_numbers(
         (0.82, 0.95),
     )
     for crop_index, (left_ratio, right_ratio) in enumerate(crop_ranges):
+        check_cancelled()
         left = int(width * left_ratio)
         right = int(width * right_ratio)
         crop = Image.fromarray(array[:, left:right])
         cv_image = preprocess_page_image(crop)
         results, _ = get_ocr_engine()(cv_image, return_word_box=True)
+        check_cancelled()
         for result in results or []:
             raw_token = str(result[1])
             value = _parse_margin_page_token(raw_token)
@@ -397,6 +404,7 @@ def _ocr_right_margin_page_numbers(
 
 def _ocr_left_numbering_tokens(page: fitz.Page, dpi: int = 250) -> List[Tuple[float, str]]:
     """单独识别目录左侧编号列，避免点引线把 5、6、7 识别成字母。"""
+    check_cancelled()
     from .image_preprocess import preprocess_page_image
     from .ocr_engine import get_ocr_engine
 
@@ -406,6 +414,7 @@ def _ocr_left_numbering_tokens(page: fitz.Page, dpi: int = 250) -> List[Tuple[fl
     height, width = array.shape[:2]
     crop = Image.fromarray(array[:, int(width * 0.05):int(width * 0.18)])
     results, _ = get_ocr_engine()(preprocess_page_image(crop), return_word_box=True)
+    check_cancelled()
     scale_y = page.rect.height / height
     tokens = []
     for result in results or []:

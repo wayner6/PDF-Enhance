@@ -60,4 +60,3 @@ if __name__ == "__main__":
     if output.exists():
         shutil.rmtree(output)
     collect(output)
-    shutil.make_archive(str(ROOT / "build" / "PDF-Enhance-Licenses"), "zip", output)

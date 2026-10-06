@@ -3,6 +3,7 @@ import re
 import tempfile
 from typing import List, Tuple, Optional
 import pymupdf as fitz
+from .cancellation import check_cancelled
 from .parser import TOCItem
 from .detector import usable_page_text
 
@@ -11,6 +12,7 @@ def find_title_coordinate_on_page(page: fitz.Page, title: str) -> Optional[fitz.
     在指定的物理页面中寻找标题所在的精确 (x, y) 坐标。
     返回精确跳转点 Point(x, y)，若未找到则返回 None。
     """
+    check_cancelled()
     # PDF 字符级文字层也会把编号和标题拆成多个 span。和 OCR 共用
     # 几何行匹配，不去掉章节编号后搜索正文词语，也不使用标题前四字兜底。
     items = []
@@ -28,6 +30,7 @@ def find_title_coordinate_from_ocr_items(
     title: str,
 ) -> Optional[fitz.Point]:
     """优先按“章节编号 + 完整标题”查找坐标，避免命中正文中的同名词语。"""
+    check_cancelled()
     # 保留编号内的点，避免 3.3、33、3.3.1 被当成同一个编号。
     normalize = lambda value: re.sub(r"[^0-9A-Za-z\u4e00-\u9fa5.]", "", value).lower()
     target = normalize(title)
@@ -51,6 +54,7 @@ def find_title_coordinate_from_ocr_items(
     # OCR 可能把“7.2”和“技术状况评价”拆成两个框，先按 Y 坐标重建文本行。
     rows = []
     for fragment in sorted(fragments, key=lambda row: (row["yc"], row["x0"])):
+        check_cancelled()
         for row in rows:
             if abs(row["yc"] - fragment["yc"]) <= 3.0:
                 row["parts"].append(fragment)
@@ -95,6 +99,7 @@ def apply_bookmarks(
     
     返回 (成功状态, 写入条目数, 提示信息)
     """
+    check_cancelled()
     if not os.path.exists(input_pdf_path):
         return False, 0, f"输入文件不存在: {input_pdf_path}"
         
@@ -148,6 +153,7 @@ def apply_bookmarks(
                     normalized_levels.append(raw_lvl)
                     
         for i, item in enumerate(toc_items):
+            check_cancelled()
             target_pno = item.logical_page + page_offset
             
             # 特殊前置项（目次、前言）智能物理页矫正：
@@ -224,9 +230,11 @@ def apply_bookmarks(
         )
         os.close(temp_fd)
         os.unlink(temp_output)
+        check_cancelled()
         doc.save(temp_output, garbage=3, deflate=True)
         doc.close()
         doc = None
+        check_cancelled()
         os.replace(temp_output, output_pdf_path)
         temp_output = None
         

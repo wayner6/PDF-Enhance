@@ -24,5 +24,4 @@ jobs:
           path: |
             dist/PDF-Enhance.exe
             dist/PDF-Enhance-Windows.zip
-            dist/PDF-Enhance-Licenses.zip
           if-no-files-found: error

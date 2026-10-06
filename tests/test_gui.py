@@ -76,8 +76,14 @@ def test_window_modes_and_busy_controls(tmp_path, monkeypatch):
             assert app.start_btn.cget("text") == "开始处理"
         app.set_busy(True)
         assert str(app.start_btn.cget("state")) == "disabled"
+        assert str(app.cancel_btn.cget("state")) == "normal"
+        app.cancel_job()
+        assert app.cancel_event.is_set()
+        assert str(app.cancel_btn.cget("state")) == "disabled"
+        assert "正在中断" in app.status_var.get()
         app.set_busy(False)
         assert str(app.start_btn.cget("state")) == "normal"
+        assert str(app.cancel_btn.cget("state")) == "disabled"
         root.deiconify()
         root.update()
         assert (root.winfo_width(), root.winfo_height()) == root.minsize()
