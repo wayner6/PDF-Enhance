@@ -11,7 +11,7 @@ from pdf_enhance_core import TOCItem
 from tests.create_sample_pdf import generate_sample_pdf
 
 
-@pytest.mark.parametrize("mode", gui.MODES)
+@pytest.mark.parametrize("mode", gui.MODES[:3])
 def test_single_task_automatically_exports_pdf(tmp_path, monkeypatch, mode):
     source = tmp_path / "source.pdf"
     generate_sample_pdf(str(source))

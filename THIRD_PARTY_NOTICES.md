@@ -1,9 +1,9 @@
 # 第三方许可与源码
 
-PDF-Enhance 1.1.0 按 GNU Affero General Public License v3.0（AGPL-3.0-only）发布。Copyright (C) 2026 PDF-Enhance contributors。本软件不提供任何担保。项目许可见 `LICENSE`。
+PDF-Enhance 1.2.0rc1 测试版按 GNU Affero General Public License v3.0（AGPL-3.0-only）发布。Copyright (C) 2026 PDF-Enhance contributors。本软件不提供任何担保。项目许可见 `LICENSE`。
 
 项目对应源码与构建脚本：
-https://github.com/wayner6/PDF-Enhance/tree/v1.1.0
+https://github.com/wayner6/PDF-Enhance/tree/test/pdf-tools-1.2
 
 Windows 发行包中的 `notices` 目录（便携版位于 `_internal/notices`）包含项目许可、第三方许可文件及 `BUILD_DEPENDENCIES.json`。该 JSON 记录构建环境的依赖版本、上游项目地址和该版本的 PyPI 文件页面；如上游提供 source distribution，可从对应页面下载，否则使用记录的上游源码地址。MuPDF 的确切版本及完整源码下载地址另列在 JSON 的 `mupdf` 字段中。构建工具和测试依赖也会记录，不表示全部包都被打入 exe。
 
@@ -35,4 +35,4 @@ Windows 发行包中的 `notices` 目录（便携版位于 `_internal/notices`�
 - **PyInstaller**：GPLv2 或之后版本及其 bootloader exception；保留其许可与例外说明。
   - https://github.com/pyinstaller/pyinstaller
 
-完整构建依赖与各自许可声明以发行包中的 `BUILD_DEPENDENCIES.json` 和 `licenses` 子目录为准。未经修改的依赖源码可按记录的版本从上游获取；PDF-Enhance 自身的完整源码由本仓库的 `v1.1.0` 标签提供。
+完整构建依赖与各自许可声明以发行包中的 `BUILD_DEPENDENCIES.json` 和 `licenses` 子目录为准。未经修改的依赖源码可按记录的版本从上游获取；PDF-Enhance 自身的完整源码由本仓库的 `test/pdf-tools-1.2` 测试分支提供。

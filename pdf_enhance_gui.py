@@ -14,7 +14,7 @@ from tkinter import filedialog, font, messagebox, ttk
 
 import pymupdf as fitz
 from pdf_enhance_core import (
-    __version__,
+    __version__, SOURCE_URL,
     apply_bookmarks, detect_page_offset, detect_page_offset_with_ocr,
     detect_toc_pages_with_ocr, generate_searchable_pdf,
     load_general_config,
@@ -23,11 +23,12 @@ from pdf_enhance_core import (
 from pdf_enhance_core.cancellation import ProcessingCancelled, cancellation_scope, check_cancelled
 from pdf_enhance_core.detector import usable_page_text
 from pdf_enhance_core.parser import guess_level_by_numbering, toc_items_need_ocr
+from pdf_enhance_core.pdf_tools import COMPRESSION_PROFILES, PDFToolCleanupError, compress_pdf, remove_pdf_password
 
-MODES = ("仅全文 OCR", "全文 OCR + 制作书签", "仅制作书签")
+MODES = ("仅全文 OCR", "全文 OCR + 制作书签", "仅制作书签", "PDF 压缩", "PDF 密码去除")
 
 def output_path(source, directory, mode):
-    suffix = ("_ocr", "_ocr_bookmark", "_bookmark")[MODES.index(mode)]
+    suffix = ("_ocr", "_ocr_bookmark", "_bookmark", "_compressed", "_unlocked")[MODES.index(mode)]
     return Path(directory) / (Path(source).stem + suffix + ".pdf")
 
 
@@ -65,7 +66,7 @@ def enable_high_dpi():
 class PDFEnhanceApp:
     def __init__(self, root):
         self.root = root
-        root.title(f"PDF 增强 {__version__}")
+        root.title(f"PDF 增强 {__version__}（测试版）")
         menu = tk.Menu(root)
         help_menu = tk.Menu(menu, tearoff=False)
         help_menu.add_command(label="关于与许可", command=self.show_about)
@@ -94,12 +95,14 @@ class PDFEnhanceApp:
         self.directory_var = tk.StringVar()
         self.mode_var = tk.StringVar(value=MODES[1])
         self.workers_var = tk.StringVar(value=str(min(cfg["max_ocr_workers"], self.cpu_count)))
+        self.compression_var = tk.StringVar(value=COMPRESSION_PROFILES[0])
+        self.password_var = tk.StringVar()
         self.status_var = tk.StringVar(value="请选择 PDF 文件和输出目录。")
 
         frame = ttk.Frame(root, padding=16)
         frame.pack(fill="both", expand=True)
         frame.columnconfigure(0, weight=1)
-        frame.rowconfigure(5, weight=1)
+        frame.rowconfigure(6, weight=1)
         ttk.Label(frame, text="PDF 增强", style="Title.TLabel").grid(row=0, sticky="w", pady=(0, 10))
         files = ttk.LabelFrame(frame, text="文件与任务", padding=10)
         files.grid(row=1, sticky="ew")
@@ -115,31 +118,43 @@ class PDFEnhanceApp:
             button.grid(row=row, column=2)
             self.controls.append((button, "normal"))
         ttk.Label(files, text="任务").grid(row=2, column=0, sticky="nw", pady=7)
-        choices = ttk.Frame(files)
-        choices.grid(row=2, column=1, columnspan=2, sticky="w", padx=10)
-        for index, mode in enumerate(MODES):
-            button = ttk.Radiobutton(choices, text=mode, value=mode, variable=self.mode_var, command=self.mode_changed)
-            button.grid(row=index, sticky="w", pady=2)
-            self.controls.append((button, "normal"))
+        choices = ttk.Combobox(files, textvariable=self.mode_var, values=MODES, state="readonly")
+        choices.grid(row=2, column=1, columnspan=2, sticky="ew", padx=10, pady=5)
+        choices.bind("<<ComboboxSelected>>", lambda _: self.mode_changed())
+        self.controls.append((choices, "readonly"))
 
         options = ttk.Frame(frame, padding=(0, 10))
         options.grid(row=2, sticky="ew")
-        ttk.Label(options, text="OCR 并发进程数").pack(side="left")
-        workers = ttk.Spinbox(options, from_=1, to=self.cpu_count, textvariable=self.workers_var, width=5)
+        self.ocr_options = ttk.Frame(options)
+        ttk.Label(self.ocr_options, text="OCR 并发进程数").pack(side="left")
+        workers = ttk.Spinbox(self.ocr_options, from_=1, to=self.cpu_count, textvariable=self.workers_var, width=5)
         workers.pack(side="left", padx=8)
         self.controls.append((workers, "normal"))
-        ttk.Label(options, text=f"最多 {self.cpu_count} 个进程").pack(side="left")
+        ttk.Label(self.ocr_options, text=f"最多 {self.cpu_count} 个进程").pack(side="left")
+        self.compression_options = ttk.Frame(options)
+        ttk.Label(self.compression_options, text="压缩档位").pack(side="left")
+        profiles = ttk.Combobox(self.compression_options, textvariable=self.compression_var,
+                                values=COMPRESSION_PROFILES, state="readonly", width=20)
+        profiles.pack(side="left", padx=8)
+        self.controls.append((profiles, "readonly"))
+        self.password_options = ttk.Frame(frame, padding=(0, 0, 0, 8))
+        self.password_options.grid(row=3, sticky="ew")
+        ttk.Label(self.password_options, text="密码（如需）").pack(side="left")
+        password = ttk.Entry(self.password_options, textvariable=self.password_var, show="*")
+        password.pack(side="left", fill="x", expand=True, padx=(8, 0))
+        self.controls.append((password, "normal"))
 
         actions = ttk.Frame(frame, padding=(0, 8))
-        actions.grid(row=3, sticky="ew")
+        actions.grid(row=4, sticky="ew")
         self.start_btn = ttk.Button(actions, text="开始处理", style="Action.TButton", command=self.start)
         self.start_btn.pack(side="left", fill="x", expand=True, padx=(0, 8))
         self.cancel_btn = ttk.Button(actions, text="中断处理", style="Action.TButton", command=self.cancel_job, state="disabled")
         self.cancel_btn.pack(side="right")
         self.progress = ttk.Progressbar(frame, mode="determinate")
-        self.progress.grid(row=4, sticky="ew")
+        self.progress.grid(row=5, sticky="ew")
         self.status_label = ttk.Label(frame, textvariable=self.status_var, wraplength=700)
-        self.status_label.grid(row=5, sticky="new", pady=(8, 0))
+        self.status_label.grid(row=6, sticky="new", pady=(8, 0))
+        self.mode_changed()
         frame.bind("<Configure>", lambda event: self.resize_labels(event.width))
         # 以 DPI 缩放后的紧凑尺寸和控件所需尺寸为下限；启动即最小尺寸。
         root.update_idletasks()
@@ -159,7 +174,7 @@ class PDFEnhanceApp:
             "本软件按 AGPL-3.0-only 发布，不提供任何担保。\n"
             "可以按许可证条件使用、修改和再分发。\n"
             "完整许可见帮助菜单和发行包中的 notices 目录。\n\n"
-            f"对应源码与构建说明：\nhttps://github.com/wayner6/PDF-Enhance/tree/v{__version__}"
+            f"对应源码与构建说明：\n{SOURCE_URL}"
         ))
 
     def show_license(self):
@@ -175,13 +190,27 @@ class PDFEnhanceApp:
         self.status_label.configure(wraplength=max(200, width - 50))
 
     def mode_changed(self):
+        self.ocr_options.pack_forget()
+        self.compression_options.pack_forget()
+        if self.mode_var.get() in MODES[:3]:
+            self.ocr_options.pack(fill="x")
+            self.password_options.grid_remove()
+        else:
+            self.password_options.grid()
+            if self.mode_var.get() == MODES[3]:
+                self.compression_options.pack(fill="x")
+        self.password_var.set("")
         self.status_var.set("设置任务后点击开始处理。" if self.source else "请选择 PDF 文件和输出目录。")
+        self.root.update_idletasks()
+        width, height = self.root.minsize()
+        self.root.minsize(width, min(round(self.root.winfo_screenheight() * .85), max(height, self.root.winfo_reqheight())))
 
     def choose_pdf(self):
         path = filedialog.askopenfilename(filetypes=[("PDF 文件", "*.pdf")])
         if path:
             self.source = Path(path)
             self.path_var.set(display_path(path))
+            self.password_var.set("")
             if not self.directory_var.get():
                 self.directory_var.set(display_path(self.source.parent))
             self.status_var.set("已选择文件；设置任务后点击开始。")
@@ -232,6 +261,8 @@ class PDFEnhanceApp:
             self.events.put(("done", result))
         except ProcessingCancelled:
             self.finish_cancelled()
+        except PDFToolCleanupError as exc:
+            self.events.put(("error", f"错误：{exc}"))
         except Exception as exc:
             if self.cancel_event.is_set():
                 self.finish_cancelled()
@@ -294,22 +325,37 @@ class PDFEnhanceApp:
         return not target.exists() or messagebox.askyesno("确认覆盖", f"生成成功后将替换：\n{display_path(target)}\n\n继续？")
 
     def start(self):
+        mode = self.mode_var.get()
+        workers = 1
         try:
             target = self.validate_target()
-            try:
-                workers = int(self.workers_var.get())
-            except ValueError:
-                raise ValueError("OCR 并发进程数必须是整数。") from None
-            if not 1 <= workers <= self.cpu_count:
-                raise ValueError(f"OCR 并发进程数必须在 1 到 {self.cpu_count} 之间。")
+            if mode in MODES[:3]:
+                try:
+                    workers = int(self.workers_var.get())
+                except ValueError:
+                    raise ValueError("OCR 并发进程数必须是整数。") from None
+                if not 1 <= workers <= self.cpu_count:
+                    raise ValueError(f"OCR 并发进程数必须在 1 到 {self.cpu_count} 之间。")
         except ValueError as exc:
             messagebox.showerror("设置错误", str(exc))
             return
-        mode = self.mode_var.get()
         if not self.confirm_target(target):
+            return
+        if mode in MODES[3:]:
+            password = self.password_var.get()
+            self.password_var.set("")
+            self.start_job(self.tools_worker, self.source, mode, target, self.compression_var.get(), password)
             return
         working = Path(self.workspace.name) / "searchable.pdf" if mode == MODES[1] else target
         self.start_job(self.complete_worker, self.source, mode, working, target, workers)
+
+    def tools_worker(self, source, mode, output, profile, password):
+        status = lambda message: self.events.put(("status", message))
+        if mode == MODES[3]:
+            message = compress_pdf(source, output, profile=profile, password=password, status_callback=status)
+        else:
+            message = remove_pdf_password(source, output, password=password, status_callback=status)
+        return "saved", f"{message}\n输出：{display_path(output)}"
 
     def complete_worker(self, source, mode, working, output, workers):
         result = self.process_worker(source, mode, working, workers)

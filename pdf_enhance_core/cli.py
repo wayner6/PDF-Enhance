@@ -8,7 +8,7 @@ from rich.prompt import Prompt, IntPrompt, Confirm
 from rich.tree import Tree
 
 from pdf_enhance_core import (
-    __version__,
+    __version__, SOURCE_URL,
     text_layer_stats,
     text_quality_stats,
     scan_layer_stats,
@@ -114,7 +114,7 @@ def run_wizard():
             "  -V, --version    显示版本\n\n"
             "许可：AGPL-3.0-only；允许按许可证条件使用、修改和再分发，无任何担保。\n"
             "完整许可见 LICENSE。对应源码与构建说明：\n"
-            f"https://github.com/wayner6/PDF-Enhance/tree/v{APP_VERSION}"
+            + SOURCE_URL
         )
         return
     if len(sys.argv) > 1 and sys.argv[1] in {"-V", "--version"}:

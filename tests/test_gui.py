@@ -12,7 +12,7 @@ import pdf_enhance_gui as gui
 from pdf_enhance_core import TOCItem
 
 
-@pytest.mark.parametrize("mode", gui.MODES)
+@pytest.mark.parametrize("mode", gui.MODES[:3])
 def test_three_task_routes(tmp_path, monkeypatch, mode):
     source = tmp_path / "source.pdf"
     with fitz.open() as doc:
@@ -50,7 +50,7 @@ def test_three_task_routes(tmp_path, monkeypatch, mode):
 
 def test_output_names(tmp_path):
     assert [gui.output_path("book.pdf", tmp_path, mode).name for mode in gui.MODES] == [
-        "book_ocr.pdf", "book_ocr_bookmark.pdf", "book_bookmark.pdf"
+        "book_ocr.pdf", "book_ocr_bookmark.pdf", "book_bookmark.pdf", "book_compressed.pdf", "book_unlocked.pdf"
     ]
 
 
@@ -62,7 +62,7 @@ def test_window_modes_and_busy_controls(tmp_path, monkeypatch):
     app = gui.PDFEnhanceApp(root)
     try:
         assert "PDF 增强" in root.title()
-        assert len(gui.MODES) == 3
+        assert len(gui.MODES) == 5
         assert not hasattr(app, "pages_var")
         assert not hasattr(app, "offset_var")
         assert not hasattr(app, "target_label")
@@ -94,13 +94,27 @@ def test_window_modes_and_busy_controls(tmp_path, monkeypatch):
         app.directory_var.set(str(tmp_path))
         jobs = []
         monkeypatch.setattr(app, "start_job", lambda target, *args: jobs.append((target, args)))
+        app.mode_var.set(gui.MODES[3])
+        app.mode_changed()
+        assert app.compression_options.winfo_manager() == "pack"
+        assert app.password_options.winfo_manager() == "grid"
+        app.workers_var.set("not an integer")
+        app.password_var.set("known-password")
         app.start()
-        assert jobs[0][0] == app.complete_worker
+        assert jobs[0][0] == app.tools_worker
+        assert jobs[0][1][-1] == "known-password"
+        assert app.password_var.get() == ""
+        app.mode_var.set(gui.MODES[2])
+        app.mode_changed()
+        assert not app.password_options.winfo_manager()
+        app.workers_var.set("1")
+        app.start()
+        assert jobs[1][0] == app.complete_worker
         output = tmp_path / "source_bookmark.pdf"
         output.write_bytes(b"existing")
         monkeypatch.setattr(gui.messagebox, "askyesno", lambda *args: False)
         app.start()
-        assert len(jobs) == 1
+        assert len(jobs) == 2
         assert output.read_bytes() == b"existing"
     finally:
         app.workspace.cleanup()

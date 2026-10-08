@@ -1,6 +1,7 @@
 """Keep the release version, Windows resources and packaged notices in sync."""
 
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -15,13 +16,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_release_version_and_license():
     project = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    assert __version__ == "1.1.0"
+    assert __version__ == "1.2.0rc1"
+    numeric_version = re.match(r"\d+\.\d+\.\d+", __version__).group()
     assert f'version = "{__version__}"' in project
     assert 'license = "AGPL-3.0-only"' in project
     assembly = ET.parse(ROOT / "windows_app.manifest").find("{urn:schemas-microsoft-com:asm.v1}assemblyIdentity")
-    assert assembly.attrib["version"] == f"{__version__}.0"
+    assert assembly.attrib["version"] == f"{numeric_version}.0"
     resource = (ROOT / "windows_version_info.txt").read_text(encoding="utf-8")
-    assert f"'FileVersion', '{__version__}.0'" in resource
+    assert f"'FileVersion', '{numeric_version}.0'" in resource
     assert f"'ProductVersion', '{__version__}'" in resource
     result = subprocess.run([sys.executable, "pdf_enhance.py", "--version"], cwd=ROOT,
                             capture_output=True, text=True, check=True)

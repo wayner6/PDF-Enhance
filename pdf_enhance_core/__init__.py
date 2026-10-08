@@ -1,4 +1,5 @@
-__version__ = "1.1.0"
+__version__ = "1.2.0rc1"
+SOURCE_URL = "https://github.com/wayner6/PDF-Enhance/tree/test/pdf-tools-1.2"
 
 from .detector import check_pdf_text_layer, text_layer_stats, text_quality_stats, scan_layer_stats, detect_toc_pages, detect_toc_pages_with_ocr, parse_page_range
 from .parser import parse_toc_from_pages, parse_toc_from_ocr_pages, TOCItem
@@ -9,6 +10,7 @@ from .ocr_engine import get_ocr_engine, ocr_pdf_page
 from .pdf_ocr_pipeline import generate_searchable_pdf
 from .ai_toc_parser import parse_toc_with_vision_ai
 from .config import load_ai_config, load_general_config
+from .pdf_tools import compress_pdf, remove_pdf_password
 
 __all__ = [
     "check_pdf_text_layer",
@@ -29,6 +31,8 @@ __all__ = [
     "get_ocr_engine",
     "ocr_pdf_page",
     "generate_searchable_pdf",
+    "compress_pdf",
+    "remove_pdf_password",
     "parse_toc_with_vision_ai",
     "load_ai_config",
     "load_general_config"
